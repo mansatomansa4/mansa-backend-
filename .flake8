@@ -1,0 +1,10 @@
+[#] Explicit flake8 configuration (pyproject.toml fallback not guaranteed with older flake8 versions)
+[flake8]
+max-line-length = 100
+extend-ignore = E203,W503,W391
+exclude = \
+    .git,\
+    __pycache__,\
+    venv,\
+    migrations,\
+    */site-packages/*

@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+
+# Env
+.env
+.env.*
+!.env.example
+venv/
+.envrc
+
+# IDE
+.vscode/
+.idea/
+
+# Bytecode / build
+build/
+dist/
+.python-version
+
+# Django
+media/
+staticfiles/
+
+# Coverage / test
+htmlcov/
+.coverage*
+.pytest_cache/
+.mypy_cache/
+
+# Docker
+*.log

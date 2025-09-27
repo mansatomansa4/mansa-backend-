@@ -1,0 +1,37 @@
+[tool.black]
+line-length = 100
+target-version = ['py312']
+
+[tool.isort]
+profile = 'black'
+line_length = 100
+
+[tool.flake8]
+max-line-length = 100
+extend-ignore = ["E203", "W503"]
+exclude = ["venv", "migrations"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.dev"
+python_files = ["tests.py", "test_*.py", "*_tests.py"]
+addopts = "-ra"
+markers = [
+	"django_db: mark test as using the django database",
+]
+filterwarnings = [
+	"ignore::DeprecationWarning",
+]
+minversion = "8.0"
+
+[tool.coverage.run]
+branch = true
+source = ["apps", "config"]
+omit = [
+	"*/migrations/*",
+	"config/wsgi.py",
+	"manage.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
