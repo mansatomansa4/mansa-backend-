@@ -4,7 +4,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from apps.emails.tasks import send_user_approval_email, send_user_denial_email
+from apps.emails.tasks import send_user_approval_email, send_user_denial_email, send_welcome_email
 
 from .models import User
 from .permissions import IsAdmin
@@ -15,6 +15,10 @@ class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
     serializer_class = RegisterSerializer
     permission_classes = [AllowAny]
+
+    def perform_create(self, serializer):
+        user = serializer.save()
+        send_welcome_email.delay(user.id)
 
 
 class MeView(generics.RetrieveUpdateAPIView):
