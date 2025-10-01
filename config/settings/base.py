@@ -67,11 +67,31 @@ WSGI_APPLICATION = "config.wsgi.application"
 DATABASE_URL = os.getenv("DATABASE_URL")
 # Treat obvious placeholder values as unset so local dev doesn't try to resolve an invalid host
 PLACEHOLDER_DB_HOST_TOKENS = {"HOST", "YOUR_HOST", "CHANGE_ME"}
+VALID_DB_SCHEMES = {
+    "postgres", "postgresql", "cockroach", "mysql", "sqlite",
+    "oracle", "mssql", "redshift", "timescale"
+}
 
 
 def _is_placeholder_db(url: str | None) -> bool:
     if not url:
         return True
+
+    # Check if URL starts with invalid scheme (like https://)
+    try:
+        scheme = url.split("://", 1)[0].lower() if "://" in url else ""
+        if scheme and scheme not in VALID_DB_SCHEMES:
+            import sys
+            print(
+                f"WARNING: DATABASE_URL has invalid scheme '{scheme}://'. "
+                f"Expected one of: {', '.join(VALID_DB_SCHEMES)}. "
+                f"Falling back to SQLite.",
+                file=sys.stderr
+            )
+            return True
+    except Exception:  # pragma: no cover - defensive
+        pass
+
     # crude parse: look for '@HOST:' pattern or missing real host
     try:
         at_split = url.split("@", 1)
