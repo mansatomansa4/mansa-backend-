@@ -15,11 +15,11 @@ SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 # Sentry integration
 SENTRY_DSN = os.getenv("SENTRY_DSN")
 if SENTRY_DSN:
+    import logging
+
     import sentry_sdk
     from sentry_sdk.integrations.django import DjangoIntegration
     from sentry_sdk.integrations.logging import LoggingIntegration
-
-    import logging
 
     def _level(val: str, default: str) -> int | None:  # helper to coerce string level names
         v = os.getenv(val, default)
