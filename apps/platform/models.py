@@ -123,6 +123,24 @@ class Project(models.Model):
     updated_at = models.DateTimeField(null=True, blank=True)
     member_id = models.UUIDField(null=True, blank=True)
 
+    # New metadata fields from requirements
+    objectives = models.TextField(null=True, blank=True)
+    deliverables = models.TextField(null=True, blank=True)
+    focal_person_id = models.UUIDField(null=True, blank=True)
+    focal_person_name = models.TextField(null=True, blank=True)
+    focal_person_email = models.TextField(null=True, blank=True)
+    domain_tags = models.JSONField(null=True, blank=True)  # e.g., ['CyberSecurity', 'AI', 'ML']
+    priority = models.TextField(null=True, blank=True)  # low, medium, high, critical
+    resources_needed = models.JSONField(null=True, blank=True)
+    human_skills_required = models.TextField(null=True, blank=True)
+    platform_requirements = models.TextField(null=True, blank=True)
+    devices_required = models.TextField(null=True, blank=True)
+    timeline_start = models.DateField(null=True, blank=True)
+    timeline_end = models.DateField(null=True, blank=True)
+    budget_estimate = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    current_budget = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    is_concurrent = models.BooleanField(default=False)
+
     class Meta:
         db_table = "projects"
         managed = False
