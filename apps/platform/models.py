@@ -211,3 +211,101 @@ class EmailNotification(models.Model):
         managed = False
         verbose_name = "Email Notification"
         verbose_name_plural = "Email Notifications"
+
+
+class ResearchCohortApplication(models.Model):
+    """
+    Model for Research Cohort Applications.
+    Requires applicant to be a registered member (email verification).
+    """
+    id = models.UUIDField(primary_key=True)
+
+    # Applicant Information (linked to members table)
+    member_id = models.UUIDField()
+    email = models.TextField()
+    name = models.TextField()
+    phone = models.TextField(null=True, blank=True)
+
+    # Research-specific fields
+    research_interest = models.TextField()
+    research_topic = models.TextField(null=True, blank=True)
+    research_experience = models.TextField(null=True, blank=True)
+    academic_background = models.TextField(null=True, blank=True)
+    current_institution = models.TextField(null=True, blank=True)
+    highest_qualification = models.TextField(null=True, blank=True)
+    field_of_study = models.TextField(null=True, blank=True)
+    publications = models.TextField(null=True, blank=True)
+    skills = models.TextField(null=True, blank=True)
+    motivation = models.TextField()
+    availability = models.TextField(null=True, blank=True)
+    preferred_research_area = models.TextField(null=True, blank=True)
+
+    # Application metadata
+    status = models.TextField(default='pending')  # pending, approved, rejected, waitlist, withdrawn
+    cohort_batch = models.TextField(null=True, blank=True)
+    applied_at = models.DateTimeField(null=True, blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.UUIDField(null=True, blank=True)
+    reviewer_notes = models.TextField(null=True, blank=True)
+
+    # Timestamps
+    created_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "research_cohort_applications"
+        managed = False
+        verbose_name = "Research Cohort Application"
+        verbose_name_plural = "Research Cohort Applications"
+
+    def __str__(self):
+        return f"{self.name} - Research Cohort ({self.status})"
+
+
+class EducationCohortApplication(models.Model):
+    """
+    Model for Education Cohort Applications.
+    Requires applicant to be a registered member (email verification).
+    """
+    id = models.UUIDField(primary_key=True)
+
+    # Applicant Information (linked to members table)
+    member_id = models.UUIDField()
+    email = models.TextField()
+    name = models.TextField()
+    phone = models.TextField(null=True, blank=True)
+
+    # Education-specific fields
+    education_interest = models.TextField()
+    current_education_level = models.TextField(null=True, blank=True)
+    target_education_level = models.TextField(null=True, blank=True)
+    current_institution = models.TextField(null=True, blank=True)
+    field_of_study = models.TextField(null=True, blank=True)
+    learning_goals = models.TextField(null=True, blank=True)
+    skills_to_develop = models.TextField(null=True, blank=True)
+    prior_experience = models.TextField(null=True, blank=True)
+    preferred_learning_format = models.TextField(null=True, blank=True)
+    time_commitment = models.TextField(null=True, blank=True)
+    motivation = models.TextField()
+    availability = models.TextField(null=True, blank=True)
+
+    # Application metadata
+    status = models.TextField(default='pending')  # pending, approved, rejected, waitlist, withdrawn
+    cohort_batch = models.TextField(null=True, blank=True)
+    applied_at = models.DateTimeField(null=True, blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.UUIDField(null=True, blank=True)
+    reviewer_notes = models.TextField(null=True, blank=True)
+
+    # Timestamps
+    created_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "education_cohort_applications"
+        managed = False
+        verbose_name = "Education Cohort Application"
+        verbose_name_plural = "Education Cohort Applications"
+
+    def __str__(self):
+        return f"{self.name} - Education Cohort ({self.status})"
