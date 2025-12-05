@@ -3,42 +3,48 @@
 from django.contrib import admin
 from django.http import JsonResponse
 from django.urls import include, path
-from django.views import View
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from apps.core import analytics
 from apps.users.permissions import IsAdmin
 
 
-class AdminAnalyticsBase(View):  # pragma: no cover - thin wrappers
+class AnalyticsOverviewView(APIView):
+    """Analytics overview endpoint with JWT authentication."""
+
     permission_classes = [IsAdmin]
 
-    def dispatch(self, request, *args, **kwargs):  # type: ignore
-        # Manual permission check since we are not using DRF here for lightweight endpoints
-        user = request.user
-        if not (user.is_authenticated and getattr(user, "role", "") in ["admin", "super_admin"]):
-            return JsonResponse({"detail": "Forbidden"}, status=403)
-        return super().dispatch(request, *args, **kwargs)
+    def get(self, request):
+        return Response(analytics.overview_metrics())
 
 
-class AnalyticsOverviewView(AdminAnalyticsBase):
-    def get(self, request):  # type: ignore
-        return JsonResponse(analytics.overview_metrics())
+class AnalyticsUsersView(APIView):
+    """Analytics users endpoint with JWT authentication."""
+
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        return Response(analytics.user_metrics())
 
 
-class AnalyticsUsersView(AdminAnalyticsBase):
-    def get(self, request):  # type: ignore
-        return JsonResponse(analytics.user_metrics())
+class AnalyticsProjectsView(APIView):
+    """Analytics projects endpoint with JWT authentication."""
+
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        return Response(analytics.project_metrics())
 
 
-class AnalyticsProjectsView(AdminAnalyticsBase):
-    def get(self, request):  # type: ignore
-        return JsonResponse(analytics.project_metrics())
+class AnalyticsEmailsView(APIView):
+    """Analytics emails endpoint with JWT authentication."""
 
+    permission_classes = [IsAdmin]
 
-class AnalyticsEmailsView(AdminAnalyticsBase):
-    def get(self, request):  # type: ignore
-        return JsonResponse(analytics.email_metrics())
+    def get(self, request):
+        return Response(analytics.email_metrics())
 
 
 def root_view(request):  # pragma: no cover - simple convenience endpoint
