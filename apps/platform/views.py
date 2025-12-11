@@ -219,12 +219,39 @@ class MemberViewSet(DatabaseGuardMixin, mixins.CreateModelMixin, viewsets.ReadOn
         
         try:
             serializer.is_valid(raise_exception=True)
-            # Perform the creation
-            self.perform_create(serializer)
-            headers = self.get_success_headers(serializer.data)
             
-            logger.info(f"Successfully created member: {serializer.data.get('email')}")
-            return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+            # Create the member instance but don't save yet
+            member = Member(
+                id=uuid.uuid4(),  # Generate UUID explicitly
+                name=data.get('name'),
+                email=data.get('email'),
+                phone=data.get('phone'),
+                gender=data.get('gender'),
+                membershiptype=data.get('membershiptype'),
+                country=data.get('country'),
+                city=data.get('city'),
+                linkedin=data.get('linkedin'),
+                experience=data.get('experience'),
+                areaOfExpertise=data.get('areaOfExpertise'),
+                school=data.get('school'),
+                level=data.get('level'),
+                occupation=data.get('occupation'),
+                jobtitle=data.get('jobtitle'),
+                industry=data.get('industry'),
+                major=data.get('major'),
+                skills=data.get('skills'),
+                created_at=timezone.now(),
+                updated_at=timezone.now(),
+                is_active=True
+            )
+            member.save()
+            
+            # Serialize the created member for response
+            response_serializer = self.get_serializer(member)
+            headers = self.get_success_headers(response_serializer.data)
+            
+            logger.info(f"Successfully created member: {member.email}")
+            return Response(response_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
         except Exception as e:
             logger.error(f"Error creating member: {str(e)}")
             logger.error(f"Serializer errors: {serializer.errors if hasattr(serializer, 'errors') else 'N/A'}")
