@@ -183,11 +183,17 @@ CORS_ALLOWED_ORIGINS = [
     "https://mansa-dashboard.vercel.app",  # production dashboard
     "https://mansa-to-mansa.vercel.app",  # production website
     "https://mansatomansa.vercel.app",  # alternative production website
+    "https://mansa-website-dusky.vercel.app",  # current production deployment
 ]
 
 # Add production origins from environment variable (comma-separated)
 if CORS_ALLOWED_ORIGINS_ENV:
     CORS_ALLOWED_ORIGINS.extend([origin.strip() for origin in CORS_ALLOWED_ORIGINS_ENV.split(",") if origin.strip()])
+
+# Allow all Vercel preview deployments
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://.*\.vercel\.app$",
+]
 
 CORS_ALLOW_CREDENTIALS = True
 
