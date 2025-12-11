@@ -31,6 +31,7 @@ INSTALLED_APPS = [
     "apps.platform",
     "apps.projects",
     "apps.emails",
+    "apps.events",
 ]
 
 MIDDLEWARE = [
