@@ -333,6 +333,56 @@ class MemberViewSet(DatabaseGuardMixin, mixins.CreateModelMixin, viewsets.ReadOn
         response['Content-Disposition'] = f'attachment; filename="members_export_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv"'
         return response
 
+    @action(detail=False, methods=['get'], url_path='locations')
+    def member_locations(self, request):
+        """Get member locations grouped by country for world map visualization"""
+        if self._db_is_sqlite():
+            return Response({"detail": "Remote data unavailable in sqlite mode"}, status=503)
+
+        from django.db.models import Count
+        from collections import defaultdict
+
+        # Get all members with country information
+        members = Member.objects.filter(
+            country__isnull=False,
+            is_active=True
+        ).exclude(country='').order_by('country')
+
+        # Group members by country
+        locations_by_country = defaultdict(list)
+        for member in members:
+            country = member.country.strip() if member.country else None
+            if country:
+                locations_by_country[country].append({
+                    'id': str(member.id),
+                    'name': member.name,
+                    'email': member.email,
+                    'city': member.city,
+                    'membershipType': member.membershiptype,
+                    'gender': member.gender,
+                    'occupation': member.occupation,
+                    'industry': member.industry,
+                })
+
+        # Format the response
+        locations = [
+            {
+                'country': country,
+                'count': len(members_list),
+                'members': members_list
+            }
+            for country, members_list in locations_by_country.items()
+        ]
+
+        # Sort by count (descending)
+        locations.sort(key=lambda x: x['count'], reverse=True)
+
+        return Response({
+            'total_members': members.count(),
+            'total_countries': len(locations),
+            'locations': locations
+        })
+
     @action(detail=False, methods=['get'], url_path='analytics')
     def analytics(self, request):
         """Get member analytics"""
