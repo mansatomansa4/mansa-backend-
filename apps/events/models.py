@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
+import uuid
 
 User = settings.AUTH_USER_MODEL
 
@@ -9,6 +10,7 @@ class Event(models.Model):
     """
     Model for community events that can be managed from the dashboard
     and displayed on the frontend events page.
+    Uses existing Supabase events table.
     """
     STATUS_CHOICES = [
         ('upcoming', 'Upcoming'),
@@ -25,6 +27,9 @@ class Event(models.Model):
         ('other', 'Other'),
     ]
 
+    # Use UUID as primary key to match Supabase schema
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False, db_column='id')
+    
     # Basic Information
     title = models.CharField(max_length=255)
     description = models.TextField()
@@ -43,21 +48,19 @@ class Event(models.Model):
     max_attendees = models.IntegerField(null=True, blank=True)
     attendee_count = models.IntegerField(default=0)
     
-    # Media
-    flyer = models.ImageField(upload_to='events/flyers/', blank=True, null=True)
+    # Media - store URL instead of ImageField for Supabase storage
+    flyer_url = models.TextField(blank=True, null=True, db_column='flyer_url')
     
-    # Metadata
-    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='created_events')
+    # Metadata - use UUID for created_by to match Supabase auth.users
+    created_by = models.UUIDField(null=True, blank=True, db_column='created_by')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     published = models.BooleanField(default=False)
     
     class Meta:
+        db_table = 'events'  # Use existing Supabase table
+        managed = False  # Don't let Django manage this table
         ordering = ['-date', '-start_time']
-        indexes = [
-            models.Index(fields=['status', 'date']),
-            models.Index(fields=['published', 'status']),
-        ]
     
     def __str__(self):
         return f"{self.title} - {self.date}"
@@ -72,15 +75,19 @@ class Event(models.Model):
 class EventImage(models.Model):
     """
     Model for multiple images per event (event photos/gallery)
+    Uses existing Supabase event_images table.
     """
-    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name='images')
-    image = models.ImageField(upload_to='events/photos/')
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name='images', db_column='event_id')
+    image_url = models.TextField(db_column='image_url')  # URL to Supabase storage
     caption = models.CharField(max_length=255, blank=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
-    order = models.IntegerField(default=0)
+    display_order = models.IntegerField(default=0, db_column='display_order')
     
     class Meta:
-        ordering = ['order', 'uploaded_at']
+        db_table = 'event_images'  # Use existing Supabase table
+        managed = False  # Don't let Django manage this table
+        ordering = ['display_order', 'uploaded_at']
     
     def __str__(self):
         return f"Image for {self.event.title}"

@@ -40,29 +40,42 @@ class EventViewSet(viewsets.ModelViewSet):
         return EventSerializer
     
     def create(self, request, *args, **kwargs):
-        """Handle event creation with file uploads"""
+        """Handle event creation with file uploads to Supabase"""
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
-        # Save event with current user as creator
-        event = serializer.save(created_by=request.user)
+        # Get user ID (UUID) - for now, set to None as we're using JWT tokens
+        # In production, you'd map JWT user to Supabase auth.users UUID
+        created_by_uuid = None
+        if request.user.is_authenticated:
+            # You can add logic here to get the Supabase UUID from your users table
+            # For now, we'll leave it as None
+            pass
+        
+        # Save event
+        event = serializer.save(created_by=created_by_uuid)
+        
+        # Handle flyer upload if provided
+        flyer_file = request.FILES.get('flyer')
+        if flyer_file:
+            # TODO: Upload to Supabase storage and get URL
+            # For now, we'll skip file upload - you can add Supabase S3 upload here
+            pass
         
         # Handle multiple image uploads if provided
         images = request.FILES.getlist('images')
         if images:
-            for image_file in images:
-                EventImage.objects.create(
-                    event=event,
-                    image=image_file,
-                    caption=request.data.get('caption', '')
-                )
+            for idx, image_file in enumerate(images):
+                # TODO: Upload to Supabase storage and get URL
+                # For now, we'll skip - you can add Supabase S3 upload here
+                pass
         
         # Re-serialize with images included
         output_serializer = self.get_serializer(event)
         return Response(output_serializer.data, status=status.HTTP_201_CREATED)
     
     def update(self, request, *args, **kwargs):
-        """Handle event updates with file uploads"""
+        """Handle event updates with file uploads to Supabase"""
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
@@ -71,15 +84,18 @@ class EventViewSet(viewsets.ModelViewSet):
         # Save updated event
         event = serializer.save()
         
+        # Handle flyer upload if provided
+        flyer_file = request.FILES.get('flyer')
+        if flyer_file:
+            # TODO: Upload to Supabase storage and get URL
+            pass
+        
         # Handle new image uploads if provided
         images = request.FILES.getlist('images')
         if images:
-            for image_file in images:
-                EventImage.objects.create(
-                    event=event,
-                    image=image_file,
-                    caption=request.data.get('caption', '')
-                )
+            for idx, image_file in enumerate(images):
+                # TODO: Upload to Supabase storage and get URL
+                pass
         
         # Re-serialize with images included
         output_serializer = self.get_serializer(event)

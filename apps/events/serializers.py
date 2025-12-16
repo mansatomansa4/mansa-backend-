@@ -4,6 +4,8 @@ from .models import Event, EventImage
 
 class EventImageSerializer(serializers.ModelSerializer):
     """Serializer for event images"""
+    image = serializers.CharField(source='image_url')
+    order = serializers.IntegerField(source='display_order', required=False, default=0)
     
     class Meta:
         model = EventImage
@@ -14,7 +16,7 @@ class EventImageSerializer(serializers.ModelSerializer):
 class EventSerializer(serializers.ModelSerializer):
     """Serializer for Event model"""
     images = EventImageSerializer(many=True, read_only=True)
-    created_by_name = serializers.SerializerMethodField()
+    flyer = serializers.CharField(source='flyer_url', required=False, allow_blank=True, allow_null=True)
     time_display = serializers.SerializerMethodField()
     
     class Meta:
@@ -23,14 +25,9 @@ class EventSerializer(serializers.ModelSerializer):
             'id', 'title', 'description', 'category', 'date', 'start_time', 
             'end_time', 'location', 'is_virtual', 'virtual_link', 'status',
             'max_attendees', 'attendee_count', 'flyer', 'images', 'published',
-            'created_by', 'created_by_name', 'time_display', 'created_at', 'updated_at'
+            'created_by', 'time_display', 'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
-    
-    def get_created_by_name(self, obj):
-        if obj.created_by:
-            return f"{obj.created_by.first_name} {obj.created_by.last_name}".strip() or obj.created_by.email
-        return "System"
+        read_only_fields = ['id', 'created_at', 'updated_at']
     
     def get_time_display(self, obj):
         return f"{obj.start_time.strftime('%I:%M %p')} - {obj.end_time.strftime('%I:%M %p')}"
@@ -39,6 +36,7 @@ class EventSerializer(serializers.ModelSerializer):
 class EventListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for event lists"""
     images_count = serializers.SerializerMethodField()
+    flyer = serializers.CharField(source='flyer_url', required=False, allow_blank=True, allow_null=True)
     
     class Meta:
         model = Event
