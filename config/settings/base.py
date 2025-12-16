@@ -181,6 +181,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:4000",  # admin dashboard
     "http://127.0.0.1:4000",  # admin dashboard
     "https://mansa-dashboard.vercel.app",  # production dashboard
+    "https://mansa-dashboard-a20uzzd3j-wuniabdulai19-4405s-projects.vercel.app",  # dashboard preview
     "https://mansa-to-mansa.vercel.app",  # production website
     "https://mansatomansa.vercel.app",  # alternative production website
     "https://mansa-website-dusky.vercel.app",  # current production deployment

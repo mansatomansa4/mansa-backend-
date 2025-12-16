@@ -2,6 +2,7 @@ from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAuthenticated
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
 
@@ -17,6 +18,7 @@ class EventViewSet(viewsets.ModelViewSet):
     Authenticated users (admins) can create, update, and delete events.
     """
     permission_classes = [IsAuthenticatedOrReadOnly]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['status', 'category', 'published']
     search_fields = ['title', 'description', 'location']
@@ -36,6 +38,52 @@ class EventViewSet(viewsets.ModelViewSet):
         if self.action == 'list':
             return EventListSerializer
         return EventSerializer
+    
+    def create(self, request, *args, **kwargs):
+        """Handle event creation with file uploads"""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        # Save event with current user as creator
+        event = serializer.save(created_by=request.user)
+        
+        # Handle multiple image uploads if provided
+        images = request.FILES.getlist('images')
+        if images:
+            for image_file in images:
+                EventImage.objects.create(
+                    event=event,
+                    image=image_file,
+                    caption=request.data.get('caption', '')
+                )
+        
+        # Re-serialize with images included
+        output_serializer = self.get_serializer(event)
+        return Response(output_serializer.data, status=status.HTTP_201_CREATED)
+    
+    def update(self, request, *args, **kwargs):
+        """Handle event updates with file uploads"""
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        
+        # Save updated event
+        event = serializer.save()
+        
+        # Handle new image uploads if provided
+        images = request.FILES.getlist('images')
+        if images:
+            for image_file in images:
+                EventImage.objects.create(
+                    event=event,
+                    image=image_file,
+                    caption=request.data.get('caption', '')
+                )
+        
+        # Re-serialize with images included
+        output_serializer = self.get_serializer(event)
+        return Response(output_serializer.data)
     
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
