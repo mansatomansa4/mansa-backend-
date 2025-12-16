@@ -26,7 +26,8 @@ class EventViewSet(viewsets.ModelViewSet):
     ordering = ['-date']
     
     def get_queryset(self):
-        queryset = Event.objects.select_related('created_by').prefetch_related('images')
+        # Note: created_by is now a UUID field, not a ForeignKey, so no select_related needed
+        queryset = Event.objects.prefetch_related('images')
         
         # Public users only see published events
         if not self.request.user.is_authenticated:

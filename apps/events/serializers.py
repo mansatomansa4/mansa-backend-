@@ -17,7 +17,7 @@ class EventSerializer(serializers.ModelSerializer):
     """Serializer for Event model"""
     images = EventImageSerializer(many=True, read_only=True)
     flyer = serializers.CharField(source='flyer_url', required=False, allow_blank=True, allow_null=True)
-    time_display = serializers.SerializerMethodField()
+    time_display = serializers.SerializerMethodField(read_only=True)
     
     class Meta:
         model = Event
@@ -27,7 +27,13 @@ class EventSerializer(serializers.ModelSerializer):
             'max_attendees', 'attendee_count', 'flyer', 'images', 'published',
             'created_by', 'time_display', 'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
+        
+    def validate_virtual_link(self, value):
+        """Ensure virtual_link is provided if is_virtual is True"""
+        if self.initial_data.get('is_virtual') and not value:
+            return None  # Allow empty for now
+        return value
     
     def get_time_display(self, obj):
         return f"{obj.start_time.strftime('%I:%M %p')} - {obj.end_time.strftime('%I:%M %p')}"
