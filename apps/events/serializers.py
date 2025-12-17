@@ -16,7 +16,7 @@ class EventImageSerializer(serializers.ModelSerializer):
 class EventSerializer(serializers.ModelSerializer):
     """Serializer for Event model"""
     images = EventImageSerializer(many=True, read_only=True)
-    flyer = serializers.CharField(source='flyer_url', required=False, allow_blank=True, allow_null=True)
+    flyer = serializers.CharField(source='flyer_url', required=False, allow_blank=True, allow_null=True, read_only=True)
     time_display = serializers.SerializerMethodField(read_only=True)
     
     class Meta:
@@ -27,7 +27,7 @@ class EventSerializer(serializers.ModelSerializer):
             'max_attendees', 'attendee_count', 'flyer', 'images', 'published',
             'created_by', 'time_display', 'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by', 'flyer']
         
     def validate_virtual_link(self, value):
         """Ensure virtual_link is provided if is_virtual is True"""
@@ -42,7 +42,7 @@ class EventSerializer(serializers.ModelSerializer):
 class EventListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for event lists"""
     images_count = serializers.SerializerMethodField()
-    flyer = serializers.CharField(source='flyer_url', required=False, allow_blank=True, allow_null=True)
+    flyer = serializers.CharField(source='flyer_url', required=False, allow_blank=True, allow_null=True, read_only=True)
     
     class Meta:
         model = Event
