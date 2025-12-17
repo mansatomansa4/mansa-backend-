@@ -14,7 +14,17 @@ class SupabaseStorage:
     def __init__(self):
         self.url = settings.SUPABASE_URL
         self.key = settings.SUPABASE_SERVICE_ROLE_KEY or settings.SUPABASE_ANON_KEY
-        self.client: Client = create_client(self.url, self.key)
+        
+        # Validate credentials
+        if not self.url:
+            raise ValueError("SUPABASE_URL is not configured in settings")
+        if not self.key:
+            raise ValueError("SUPABASE_ANON_KEY or SUPABASE_SERVICE_ROLE_KEY must be configured")
+        
+        try:
+            self.client: Client = create_client(self.url, self.key)
+        except Exception as e:
+            raise ValueError(f"Failed to initialize Supabase client: {e}")
     
     def upload_file(
         self, 

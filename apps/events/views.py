@@ -66,7 +66,13 @@ class EventViewSet(viewsets.ModelViewSet):
         event = serializer.save(created_by=created_by_uuid)
         
         # Upload files to Supabase Storage
-        storage = get_supabase_storage()
+        try:
+            storage = get_supabase_storage()
+        except Exception as e:
+            logger.error(f"Failed to initialize Supabase storage: {e}")
+            # Return event without file uploads if storage is not configured
+            output_serializer = self.get_serializer(event)
+            return Response(output_serializer.data, status=status.HTTP_201_CREATED)
         
         # Handle flyer upload if provided
         flyer_file = request.FILES.get('flyer')
