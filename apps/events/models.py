@@ -28,7 +28,7 @@ class Event(models.Model):
     ]
 
     # Use UUID as primary key to match Supabase schema
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False, db_column='id')
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     
     # Basic Information
     title = models.CharField(max_length=255)
@@ -41,7 +41,7 @@ class Event(models.Model):
     end_time = models.TimeField()
     location = models.CharField(max_length=255)
     is_virtual = models.BooleanField(default=False)
-    virtual_link = models.URLField(blank=True, null=True)
+    virtual_link = models.TextField(blank=True, null=True)
     
     # Event Status
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='upcoming')
@@ -49,17 +49,17 @@ class Event(models.Model):
     attendee_count = models.IntegerField(default=0)
     
     # Media - store URL instead of ImageField for Supabase storage
-    flyer_url = models.TextField(blank=True, null=True, db_column='flyer_url')
+    flyer_url = models.TextField(blank=True, null=True)
     
     # Metadata - use UUID for created_by to match Supabase auth.users
-    created_by = models.UUIDField(null=True, blank=True, db_column='created_by')
+    created_by = models.UUIDField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     published = models.BooleanField(default=False)
     
     class Meta:
-        db_table = 'events'  # Use existing Supabase table
-        managed = False  # Don't let Django manage this table
+        db_table = 'events'
+        managed = False  # Use existing Supabase table
         ordering = ['-date', '-start_time']
     
     def __str__(self):
@@ -85,8 +85,8 @@ class EventImage(models.Model):
     display_order = models.IntegerField(default=0, db_column='display_order')
     
     class Meta:
-        db_table = 'event_images'  # Use existing Supabase table
-        managed = False  # Don't let Django manage this table
+        db_table = 'event_images'
+        managed = False  # Use existing Supabase table
         ordering = ['display_order', 'uploaded_at']
     
     def __str__(self):

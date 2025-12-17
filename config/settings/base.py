@@ -168,8 +168,21 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-MEDIA_URL = "media/"
-MEDIA_ROOT = BASE_DIR / "media"
+
+# Supabase Storage Configuration
+# All media files are stored in Supabase Storage buckets
+MEDIA_URL = f"{os.getenv('SUPABASE_URL', 'https://adnteftmqytcnieqmlma.supabase.co')}/storage/v1/object/public/"
+MEDIA_ROOT = BASE_DIR / "media"  # Fallback for local development only
+
+# Supabase Storage Buckets
+SUPABASE_STORAGE_BUCKETS = {
+    'event_flyers': 'event-flyers',  # Event flyers
+    'event_photos': 'event-photos',  # Event photos/images
+    'project_images': 'project-images',  # Project images
+    'profiles': 'profiles',  # User profile pictures
+    'events': 'events',  # General events bucket
+    'projects': 'projects',  # General projects bucket
+}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
