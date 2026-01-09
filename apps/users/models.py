@@ -7,6 +7,9 @@ ROLE_CHOICES = [
     ("user", "User"),
     ("admin", "Admin"),
     ("super_admin", "Super Admin"),
+    ("mentee", "Mentee"),
+    ("mentor", "Mentor"),
+    ("mentor_mentee", "Mentor & Mentee"),
 ]
 
 APPROVAL_STATUS_CHOICES = [
@@ -57,6 +60,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     approved_by = models.ForeignKey(
         "self", null=True, blank=True, on_delete=models.SET_NULL, related_name="approved_users"
     )
+    # Mentorship-specific fields
+    is_mentor = models.BooleanField(default=False, help_text="User is registered as a mentor")
+    is_mentee = models.BooleanField(default=False, help_text="User is registered as a mentee")
+    mentor_approved_at = models.DateTimeField(blank=True, null=True, help_text="When mentor application was approved")
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     date_joined = models.DateTimeField(default=timezone.now)
@@ -68,3 +75,11 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return self.email
+
+    def can_be_mentor(self):
+        """Check if user can act as a mentor (approved mentor status)"""
+        return self.is_mentor and self.mentor_approved_at is not None
+
+    def can_be_mentee(self):
+        """Check if user can act as a mentee"""
+        return self.is_mentee or self.is_active
