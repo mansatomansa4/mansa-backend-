@@ -1,8 +1,9 @@
 from django.utils import timezone
-from rest_framework import generics, permissions, viewsets
-from rest_framework.decorators import action
+from rest_framework import generics, permissions, viewsets, status
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.emails.tasks import send_user_approval_email, send_user_denial_email, send_welcome_email
 
@@ -62,3 +63,52 @@ class AdminUserViewSet(viewsets.ModelViewSet):
         user.save(update_fields=["approval_status"])
         send_user_denial_email.delay(user.id)
         return Response({"detail": "User denied"})
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def email_login(request):
+    """
+    Passwordless login using email only.
+    Checks if email exists in database and returns JWT token + user info.
+    """
+    email = request.data.get('email', '').strip().lower()
+    
+    if not email:
+        return Response(
+            {"error": "Email is required"}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    try:
+        user = User.objects.get(email=email)
+        
+        # Generate JWT tokens
+        refresh = RefreshToken.for_user(user)
+        access_token = str(refresh.access_token)
+        refresh_token = str(refresh)
+        
+        # Return user info with tokens
+        return Response({
+            "access": access_token,
+            "refresh": refresh_token,
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "role": user.role,
+                "is_mentor": user.is_mentor,
+                "is_mentee": user.is_mentee,
+                "approval_status": user.approval_status,
+            }
+        })
+        
+    except User.DoesNotExist:
+        return Response(
+            {
+                "error": "Email not found in database",
+                "detail": "This email is not registered. Please contact admin or register first."
+            },
+            status=status.HTTP_404_NOT_FOUND
+        )
