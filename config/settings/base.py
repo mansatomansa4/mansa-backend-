@@ -203,6 +203,8 @@ CORS_ALLOWED_ORIGINS = [
     "https://mansa-to-mansa.vercel.app",  # production website
     "https://mansatomansa.vercel.app",  # alternative production website
     "https://mansa-website-dusky.vercel.app",  # current production deployment
+    "https://www.mansa-to-mansa.org",  # production domain
+    "https://mansa-to-mansa.org",  # production domain (without www)
 ]
 
 # Add production origins from environment variable (comma-separated)
