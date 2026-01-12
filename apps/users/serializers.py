@@ -1,6 +1,12 @@
 from rest_framework import serializers
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from .models import User
+
+
+class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    """Custom JWT token serializer that uses email instead of username."""
+    username_field = User.USERNAME_FIELD
 
 
 class UserSerializer(serializers.ModelSerializer):

@@ -4,12 +4,18 @@ from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenObtainPairView
 
 from apps.emails.tasks import send_user_approval_email, send_user_denial_email, send_welcome_email
 
 from .models import User
 from .permissions import IsAdmin
-from .serializers import RegisterSerializer, UserSerializer
+from .serializers import CustomTokenObtainPairSerializer, RegisterSerializer, UserSerializer
+
+
+class CustomTokenObtainPairView(TokenObtainPairView):
+    """Custom JWT token view that uses email instead of username."""
+    serializer_class = CustomTokenObtainPairSerializer
 
 
 class RegisterView(generics.CreateAPIView):
