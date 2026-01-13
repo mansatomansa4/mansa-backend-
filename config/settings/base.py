@@ -15,9 +15,10 @@ DEBUG = os.getenv("DJANGO_DEBUG", "false").lower() == "true"
 
 ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,testserver").split(",")
 
-# Supabase Configuration
+# Supabase Configuration (PostgreSQL Database)
 SUPABASE_URL = os.getenv('SUPABASE_URL', '')
 SUPABASE_SERVICE_KEY = os.getenv('SUPABASE_SERVICE_KEY', '')
+SUPABASE_DB_URL = os.getenv('SUPABASE_DB_URL', '')  # Direct PostgreSQL connection string
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -70,63 +71,24 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-# Treat obvious placeholder values as unset so local dev doesn't try to resolve an invalid host
-PLACEHOLDER_DB_HOST_TOKENS = {"HOST", "YOUR_HOST", "CHANGE_ME"}
-VALID_DB_SCHEMES = {
-    "postgres", "postgresql", "cockroach", "mysql", "sqlite",
-    "oracle", "mssql", "redshift", "timescale"
-}
+# Database Configuration - Use Supabase PostgreSQL exclusively
+# Supabase provides a direct PostgreSQL connection via SUPABASE_DB_URL
+# Format: postgresql://postgres:[PASSWORD]@[HOST]:5432/postgres
+DATABASE_URL = os.getenv("SUPABASE_DB_URL") or os.getenv("DATABASE_URL")
 
-
-def _is_placeholder_db(url: str | None) -> bool:
-    if not url:
-        return True
-
-    # Check if URL starts with invalid scheme (like https://)
-    try:
-        scheme = url.split("://", 1)[0].lower() if "://" in url else ""
-        if scheme and scheme not in VALID_DB_SCHEMES:
-            import sys
-            print(
-                f"WARNING: DATABASE_URL has invalid scheme '{scheme}://'. "
-                f"Expected one of: {', '.join(VALID_DB_SCHEMES)}. "
-                f"Falling back to SQLite.",
-                file=sys.stderr
-            )
-            return True
-    except Exception:  # pragma: no cover - defensive
-        pass
-
-    # crude parse: look for '@HOST:' pattern or missing real host
-    try:
-        at_split = url.split("@", 1)
-        if len(at_split) == 2:
-            host_part = at_split[1]
-            # host_part like HOST:5432/dbname
-            host = host_part.split(":", 1)[0]
-            if host in PLACEHOLDER_DB_HOST_TOKENS:
-                return True
-    except Exception:  # pragma: no cover - defensive
-        return False
-    return False
-
-
-if _is_placeholder_db(DATABASE_URL):
-    DATABASE_URL = None
 RUNNING_TESTS = (
     "PYTEST_CURRENT_TEST" in os.environ
     or any("pytest" in arg or "py.test" in arg for arg in sys.argv)
     or any(arg.startswith("test") for arg in sys.argv)
 )
-FORCE_DB_URL_IN_TESTS = os.getenv("USE_DB_URL_IN_TESTS", "false").lower() in {"1", "true", "yes"}
 
-if DATABASE_URL and (not RUNNING_TESTS or (RUNNING_TESTS and FORCE_DB_URL_IN_TESTS)):
+if DATABASE_URL and not RUNNING_TESTS:
+    # Use Supabase PostgreSQL for production
     DATABASES = {
-        "default": dj_database_url.parse(DATABASE_URL, conn_max_age=600, ssl_require=False)
+        "default": dj_database_url.parse(DATABASE_URL, conn_max_age=600, ssl_require=True)
     }
 else:
-    # Always fallback to sqlite for tests (faster, no network) unless opt-in
+    # Use SQLite only for tests (faster, no network)
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
