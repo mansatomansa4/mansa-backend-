@@ -72,9 +72,9 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 
 # Database Configuration - Use Supabase PostgreSQL exclusively
-# Supabase provides a direct PostgreSQL connection via SUPABASE_DB_URL
-# Format: postgresql://postgres:[PASSWORD]@[HOST]:5432/postgres
-DATABASE_URL = os.getenv("SUPABASE_DB_URL") or os.getenv("DATABASE_URL")
+# Priority: SUPABASE_DB_URL > DATABASE_URL (for backward compatibility)
+SUPABASE_DB_URL = os.getenv("SUPABASE_DB_URL")
+DATABASE_URL = SUPABASE_DB_URL or os.getenv("DATABASE_URL")
 
 RUNNING_TESTS = (
     "PYTEST_CURRENT_TEST" in os.environ
@@ -83,10 +83,15 @@ RUNNING_TESTS = (
 )
 
 if DATABASE_URL and not RUNNING_TESTS:
-    # Use Supabase PostgreSQL for production
-    DATABASES = {
-        "default": dj_database_url.parse(DATABASE_URL, conn_max_age=600, ssl_require=True)
-    }
+    # Parse database URL and configure connection
+    db_config = dj_database_url.parse(DATABASE_URL, conn_max_age=600)
+    
+    # Force SSL for Supabase connections
+    if 'supabase' in DATABASE_URL.lower():
+        db_config['OPTIONS'] = db_config.get('OPTIONS', {})
+        db_config['OPTIONS']['sslmode'] = 'require'
+    
+    DATABASES = {"default": db_config}
 else:
     # Use SQLite only for tests (faster, no network)
     DATABASES = {
