@@ -76,6 +76,18 @@ WSGI_APPLICATION = "config.wsgi.application"
 SUPABASE_DB_URL = os.getenv("SUPABASE_DB_URL")
 DATABASE_URL = SUPABASE_DB_URL or os.getenv("DATABASE_URL")
 
+# Debug logging for database configuration
+if DATABASE_URL:
+    import sys
+    # Don't print the actual password, just confirm it's set
+    url_parts = DATABASE_URL.split('@')
+    if len(url_parts) > 1:
+        print(f"[INFO] Database configured: ...@{url_parts[1][:50]}...", file=sys.stderr)
+    else:
+        print(f"[INFO] Database URL set but format unexpected", file=sys.stderr)
+else:
+    print("[ERROR] No database URL configured! Set SUPABASE_DB_URL or DATABASE_URL", file=sys.stderr)
+
 RUNNING_TESTS = (
     "PYTEST_CURRENT_TEST" in os.environ
     or any("pytest" in arg or "py.test" in arg for arg in sys.argv)
@@ -83,15 +95,34 @@ RUNNING_TESTS = (
 )
 
 if DATABASE_URL and not RUNNING_TESTS:
-    # Parse database URL and configure connection
-    db_config = dj_database_url.parse(DATABASE_URL, conn_max_age=600)
-    
-    # Force SSL for Supabase connections
-    if 'supabase' in DATABASE_URL.lower():
-        db_config['OPTIONS'] = db_config.get('OPTIONS', {})
-        db_config['OPTIONS']['sslmode'] = 'require'
-    
-    DATABASES = {"default": db_config}
+    try:
+        # Parse database URL and configure connection
+        db_config = dj_database_url.parse(DATABASE_URL, conn_max_age=600)
+        
+        # Ensure we have a database name
+        if not db_config.get('NAME'):
+            # Extract from URL if missing
+            if '/postgres' in DATABASE_URL:
+                db_config['NAME'] = 'postgres'
+            else:
+                db_config['NAME'] = 'postgres'  # Default
+        
+        # Force SSL for Supabase connections
+        if 'supabase' in DATABASE_URL.lower():
+            db_config['OPTIONS'] = db_config.get('OPTIONS', {})
+            db_config['OPTIONS']['sslmode'] = 'require'
+        
+        DATABASES = {"default": db_config}
+        print(f"[INFO] Database configured successfully: {db_config.get('ENGINE', 'unknown')}", file=sys.stderr)
+    except Exception as e:
+        print(f"[ERROR] Failed to parse DATABASE_URL: {e}", file=sys.stderr)
+        # Fallback to SQLite
+        DATABASES = {
+            "default": {
+                "ENGINE": "django.db.backends.sqlite3",
+                "NAME": str(BASE_DIR / "db.sqlite3"),
+            }
+        }
 else:
     # Use SQLite only for tests (faster, no network)
     DATABASES = {
