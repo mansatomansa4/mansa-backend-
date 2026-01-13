@@ -6,6 +6,9 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
+import logging
+
+logger = logging.getLogger(__name__)
 
 from apps.emails.tasks import send_user_approval_email, send_user_denial_email, send_welcome_email
 
@@ -78,7 +81,8 @@ class AdminUserViewSet(viewsets.ModelViewSet):
 def email_login(request):
     """
     Passwordless login using email only.
-    Checks if email exists in database and returns JWT token + user info.
+    Checks if email exists in Django database or Supabase, and returns JWT token + user info.
+    If user exists in Supabase but not Django, creates Django user automatically.
     """
     email = request.data.get('email', '').strip().lower()
     
@@ -90,33 +94,80 @@ def email_login(request):
     
     try:
         user = User.objects.get(email=email)
-        
-        # Generate JWT tokens
-        refresh = RefreshToken.for_user(user)
-        access_token = str(refresh.access_token)
-        refresh_token = str(refresh)
-        
-        # Return user info with tokens
-        return Response({
-            "access": access_token,
-            "refresh": refresh_token,
-            "user": {
-                "id": user.id,
-                "email": user.email,
-                "first_name": user.first_name,
-                "last_name": user.last_name,
-                "role": user.role,
-                "is_mentor": user.is_mentor,
-                "is_mentee": user.is_mentee,
-                "approval_status": user.approval_status,
-            }
-        })
-        
     except User.DoesNotExist:
-        return Response(
-            {
-                "error": "Email not found in database",
-                "detail": "This email is not registered. Please contact admin or register first."
-            },
-            status=status.HTTP_404_NOT_FOUND
-        )
+        # Try to find user in Supabase
+        try:
+            from apps.mentorship.supabase_client import get_supabase_client
+            supabase = get_supabase_client()
+            
+            if supabase and supabase._client:
+                # Query Supabase for user by email
+                response = supabase._client.table('users').select('*').eq('email', email).execute()
+                
+                if response.data and len(response.data) > 0:
+                    supabase_user = response.data[0]
+                    
+                    # Create Django user from Supabase data
+                    user = User.objects.create_user(
+                        email=email,
+                        first_name=supabase_user.get('first_name', ''),
+                        last_name=supabase_user.get('last_name', ''),
+                        role=supabase_user.get('role', 'user'),
+                        approval_status='approved',  # Auto-approve Supabase users
+                    )
+                    
+                    # Set mentor/mentee flags if available
+                    if 'is_mentor' in supabase_user:
+                        user.is_mentor = supabase_user['is_mentor']
+                    if 'is_mentee' in supabase_user:
+                        user.is_mentee = supabase_user['is_mentee']
+                    user.save()
+                    
+                    logger.info(f"Auto-created Django user from Supabase: {email}")
+                else:
+                    return Response(
+                        {
+                            "error": "Email not found in database",
+                            "detail": "This email is not registered in either Django or Supabase. Please contact admin or register first."
+                        },
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+            else:
+                # Supabase not configured, user not found in Django
+                return Response(
+                    {
+                        "error": "Email not found in database",
+                        "detail": "This email is not registered. Please contact admin or register first."
+                    },
+                    status=status.HTTP_404_NOT_FOUND
+                )
+        except Exception as e:
+            logger.error(f"Error checking Supabase for user: {str(e)}")
+            return Response(
+                {
+                    "error": "Email not found in database",
+                    "detail": "This email is not registered. Please contact admin or register first."
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
+    
+    # Generate JWT tokens
+    refresh = RefreshToken.for_user(user)
+    access_token = str(refresh.access_token)
+    refresh_token = str(refresh)
+    
+    # Return user info with tokens
+    return Response({
+        "access": access_token,
+        "refresh": refresh_token,
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "role": user.role,
+            "is_mentor": user.is_mentor,
+            "is_mentee": user.is_mentee,
+            "approval_status": user.approval_status,
+        }
+    })

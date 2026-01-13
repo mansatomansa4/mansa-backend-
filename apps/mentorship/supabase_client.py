@@ -287,3 +287,8 @@ class SupabaseMentorshipClient:
 
 # Singleton instance
 supabase_client = SupabaseMentorshipClient()
+
+
+def get_supabase_client() -> SupabaseMentorshipClient:
+    """Get the singleton Supabase client instance"""
+    return supabase_client
