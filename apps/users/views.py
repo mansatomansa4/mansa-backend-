@@ -1,4 +1,5 @@
 from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
 from rest_framework import generics, permissions, viewsets, status
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import AllowAny
@@ -71,6 +72,7 @@ class AdminUserViewSet(viewsets.ModelViewSet):
         return Response({"detail": "User denied"})
 
 
+@csrf_exempt
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def email_login(request):
