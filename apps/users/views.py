@@ -81,8 +81,10 @@ class AdminUserViewSet(viewsets.ModelViewSet):
 def email_login(request):
     """
     Passwordless login using email only.
-    Checks if email exists in Supabase database and returns JWT token + user info.
+    Checks if email exists in members table, auto-creates user if needed, and returns JWT token.
     """
+    from apps.platform.models import Member
+    
     email = request.data.get('email', '').strip().lower()
     
     if not email:
@@ -92,36 +94,59 @@ def email_login(request):
         )
     
     try:
-        # Django is now connected directly to Supabase PostgreSQL
+        # First, try to get existing user
         user = User.objects.get(email=email)
         
-        # Generate JWT tokens
-        refresh = RefreshToken.for_user(user)
-        access_token = str(refresh.access_token)
-        refresh_token = str(refresh)
-        
-        # Return user info with tokens
-        return Response({
-            "access": access_token,
-            "refresh": refresh_token,
-            "user": {
-                "id": user.id,
-                "email": user.email,
-                "first_name": user.first_name,
-                "last_name": user.last_name,
-                "role": user.role,
-                "is_mentor": user.is_mentor,
-                "is_mentee": user.is_mentee,
-                "approval_status": user.approval_status,
-            }
-        })
-        
     except User.DoesNotExist:
-        logger.warning(f"Login attempt with unregistered email: {email}")
-        return Response(
-            {
-                "error": "Email not found in database",
-                "detail": "This email is not registered. Please contact admin or register first."
-            },
-            status=status.HTTP_404_NOT_FOUND
-        )
+        # User doesn't exist in users_user table, check members table
+        try:
+            member = Member.objects.get(email__iexact=email)
+            logger.info(f"Member found in members table: {email}. Auto-creating user account.")
+            
+            # Parse member name into first_name and last_name
+            name_parts = member.name.strip().split(maxsplit=1)
+            first_name = name_parts[0] if len(name_parts) > 0 else ""
+            last_name = name_parts[1] if len(name_parts) > 1 else ""
+            
+            # Auto-create user from member data
+            user = User.objects.create_user(
+                email=email,
+                first_name=first_name,
+                last_name=last_name,
+                role='mentee',  # Default role
+                is_mentee=True,  # Enable mentee access
+                approval_status='approved',  # Auto-approve members
+            )
+            logger.info(f"Auto-created user account for member: {email}")
+            
+        except Member.DoesNotExist:
+            # Email not found in either table
+            logger.warning(f"Login attempt with unregistered email: {email}")
+            return Response(
+                {
+                    "error": "Email not found in database",
+                    "detail": "This email is not registered in the Mansa community. Please contact admin."
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
+    
+    # Generate JWT tokens
+    refresh = RefreshToken.for_user(user)
+    access_token = str(refresh.access_token)
+    refresh_token = str(refresh)
+    
+    # Return user info with tokens
+    return Response({
+        "access": access_token,
+        "refresh": refresh_token,
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "role": user.role,
+            "is_mentor": user.is_mentor,
+            "is_mentee": user.is_mentee,
+            "approval_status": user.approval_status,
+        }
+    })
