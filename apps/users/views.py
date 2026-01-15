@@ -108,16 +108,34 @@ def email_login(request):
             first_name = name_parts[0] if len(name_parts) > 0 else ""
             last_name = name_parts[1] if len(name_parts) > 1 else ""
             
+            # Determine mentor/mentee status from membershiptype
+            membershiptype = (member.membershiptype or "").lower()
+            is_mentor = 'mentor' in membershiptype
+            is_mentee = 'mentee' in membershiptype or membershiptype == 'student'
+            
+            # If neither, default to mentee
+            if not is_mentor and not is_mentee:
+                is_mentee = True
+            
+            # Set role based on membershiptype
+            if is_mentor and is_mentee:
+                role = 'mentor_mentee'
+            elif is_mentor:
+                role = 'mentor'
+            else:
+                role = 'mentee'
+            
             # Auto-create user from member data
             user = User.objects.create_user(
                 email=email,
                 first_name=first_name,
                 last_name=last_name,
-                role='mentee',  # Default role
-                is_mentee=True,  # Enable mentee access
+                role=role,
+                is_mentor=is_mentor,
+                is_mentee=is_mentee,
                 approval_status='approved',  # Auto-approve members
             )
-            logger.info(f"Auto-created user account for member: {email}")
+            logger.info(f"Auto-created user account for member: {email} (role: {role})")
             
         except Member.DoesNotExist:
             # Email not found in either table
