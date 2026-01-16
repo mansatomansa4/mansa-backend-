@@ -448,7 +448,7 @@ class ExpertiseViewSet(viewsets.ViewSet):
             return Response(cached_data)
         
         try:
-            response = supabase_client._client.table('mentorship_expertise').select('*').eq('is_active', True).order('name').execute()
+            response = supabase_client._client.table('mentorship_expertise').select('*').order('name').execute()
             data = response.data
             
             # Cache for 1 hour
