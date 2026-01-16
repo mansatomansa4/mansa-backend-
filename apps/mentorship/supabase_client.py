@@ -75,7 +75,13 @@ class SupabaseMentorshipClient:
     def _initialize_client(self):
         """Initialize Supabase client with credentials from settings"""
         supabase_url = getattr(settings, 'SUPABASE_URL', os.getenv('SUPABASE_URL'))
-        supabase_key = getattr(settings, 'SUPABASE_SERVICE_KEY', os.getenv('SUPABASE_SERVICE_KEY'))
+        # Support both naming conventions
+        supabase_key = (
+            getattr(settings, 'SUPABASE_SERVICE_KEY', None) or 
+            getattr(settings, 'SUPABASE_SERVICE_ROLE_KEY', None) or
+            os.getenv('SUPABASE_SERVICE_KEY') or 
+            os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+        )
         
         if not supabase_url or not supabase_key:
             logger.warning("Supabase credentials not configured")
