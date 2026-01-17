@@ -48,10 +48,10 @@ class MentorViewSet(viewsets.ViewSet):
     
     def get_permissions(self):
         """
-        Allow unauthenticated access to list and retrieve actions.
+        Allow unauthenticated access to list, retrieve, and availability actions.
         Require authentication for all other actions.
         """
-        if self.action in ['list', 'retrieve']:
+        if self.action in ['list', 'retrieve', 'availability']:
             return [permissions.AllowAny()]
         return [permissions.IsAuthenticated()]
     
@@ -105,26 +105,25 @@ class MentorViewSet(viewsets.ViewSet):
             )
     
     def retrieve(self, request, pk=None):
-        """Get single mentor profile by ID"""
+        """Get single mentor profile by ID with enriched user data"""
         cache_key = f'mentor_profile_{pk}'
         cached_data = cache.get(cache_key)
         if cached_data:
             return Response(cached_data)
         
         try:
-            # Get mentor from Supabase
-            mentor_data = supabase_client._client.table('mentors').select('*').eq('id', pk).single().execute().data
+            # Use enriched method to get mentor with user data
+            filters = {'id': pk}
+            pagination = {'page': 1, 'page_size': 1}
+            result = supabase_client.get_mentors_with_member_data(filters, pagination)
             
-            if not mentor_data:
+            if not result['data']:
                 return Response(
                     {'error': 'Mentor not found'},
                     status=status.HTTP_404_NOT_FOUND
                 )
             
-            # Enrich with user data
-            user = User.objects.filter(id=mentor_data['user_id']).values('email', 'first_name', 'last_name').first()
-            if user:
-                mentor_data['user'] = user
+            mentor_data = result['data'][0]
             
             # Cache for 5 minutes
             cache.set(cache_key, mentor_data, 300)
