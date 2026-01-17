@@ -425,6 +425,75 @@ class SupabaseMentorshipClient:
         except Exception as e:
             logger.error(f"Error fetching bookings for mentor {mentor_id}: {e}")
             return []
+    
+    # ========== STORAGE OPERATIONS ==========
+    
+    def upload_mentor_photo(self, mentor_id: str, photo_file) -> str:
+        """
+        Upload mentor profile photo to Supabase storage.
+        Returns the public URL of the uploaded image.
+        """
+        try:
+            # Generate unique filename
+            import uuid
+            from pathlib import Path
+            
+            file_ext = Path(photo_file.name).suffix
+            unique_filename = f"mentor_{mentor_id}_{uuid.uuid4().hex[:8]}{file_ext}"
+            file_path = f"mentors/{unique_filename}"
+            
+            # Read file content
+            file_content = photo_file.read()
+            
+            # Upload to Supabase storage bucket
+            # Note: Bucket 'profile-pictures' should be created in Supabase dashboard
+            bucket_name = 'profile-pictures'
+            
+            # Upload file
+            response = self._circuit_breaker.call(
+                lambda: self._client.storage.from_(bucket_name).upload(
+                    file_path,
+                    file_content,
+                    {'content-type': photo_file.content_type}
+                )
+            )
+            
+            # Get public URL
+            public_url = self._client.storage.from_(bucket_name).get_public_url(file_path)
+            
+            logger.info(f"Uploaded photo for mentor {mentor_id}: {public_url}")
+            return public_url
+            
+        except Exception as e:
+            logger.error(f"Error uploading photo for mentor {mentor_id}: {e}")
+            raise Exception(f"Failed to upload photo: {str(e)}")
+    
+    def delete_mentor_photo(self, photo_url: str) -> bool:
+        """
+        Delete mentor profile photo from Supabase storage.
+        Returns True if successful.
+        """
+        try:
+            # Extract file path from URL
+            bucket_name = 'profile-pictures'
+            # URL format: https://{project}.supabase.co/storage/v1/object/public/{bucket}/{path}
+            if f'/object/public/{bucket_name}/' in photo_url:
+                file_path = photo_url.split(f'/object/public/{bucket_name}/')[1]
+                
+                # Delete file
+                self._circuit_breaker.call(
+                    lambda: self._client.storage.from_(bucket_name).remove([file_path])
+                )
+                
+                logger.info(f"Deleted photo: {file_path}")
+                return True
+            else:
+                logger.warning(f"Invalid photo URL format: {photo_url}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error deleting photo {photo_url}: {e}")
+            return False
 
 
 # Singleton instance

@@ -7,12 +7,15 @@ from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.core.cache import cache
 from django.db import connection
 from django.utils import timezone
+from django.core.files.storage import default_storage
 from datetime import datetime, timedelta
 import logging
 import hashlib
+import uuid
 
 from .serializers import (
     MentorProfileSerializer,
@@ -41,6 +44,16 @@ class MentorViewSet(viewsets.ViewSet):
     Handles listing, retrieving, creating, and updating mentor profiles.
     """
     permission_classes = [permissions.IsAuthenticated]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+    
+    def get_permissions(self):
+        """
+        Allow unauthenticated access to list and retrieve actions.
+        Require authentication for all other actions.
+        """
+        if self.action in ['list', 'retrieve']:
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]
     
     def list(self, request):
         """
@@ -179,25 +192,106 @@ class MentorViewSet(viewsets.ViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
     
-    @action(detail=True, methods=['patch'])
+    @action(detail=True, methods=['patch', 'put'])
     def update_profile(self, request, pk=None):
         """Update mentor profile with optimistic locking"""
-        # Verify ownership
-        mentor_data = supabase_client._client.table('mentors').select('*').eq('id', pk).single().execute().data
-        if not mentor_data or mentor_data['user_id'] != request.user.id:
-            return Response(
-                {'error': 'Not authorized to update this profile'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
-        serializer = MentorProfileSerializer(data=request.data, partial=True)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Get version for optimistic locking
-        expected_version = request.data.get('version', mentor_data['version'])
-        
         try:
+            # Verify ownership
+            mentor_data = supabase_client._client.table('mentors').select('*').eq('id', pk).single().execute().data
+            if not mentor_data or mentor_data['user_id'] != request.user.id:
+                return Response(
+                    {'error': 'Not authorized to update this profile'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            serializer = MentorProfileSerializer(data=request.data, partial=True)
+            if not serializer.is_valid():
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Get version for optimistic locking
+            expected_version = request.data.get('version', mentor_data['version'])
+            
+            # Update mentor profile
+            updated_data = supabase_client.update_mentor_profile(
+                pk, 
+                serializer.validated_data, 
+                expected_version
+            )
+            
+            # Clear cache
+            cache.delete(f'mentor_profile_{pk}')
+            
+            return Response(updated_data)
+        except Exception as e:
+            logger.error(f"Error updating mentor profile {pk}: {e}")
+            if 'version mismatch' in str(e).lower():
+                return Response(
+                    {'error': 'Profile was updated by another process. Please refresh and try again.'},
+                    status=status.HTTP_409_CONFLICT
+                )
+            return Response(
+                {'error': 'Failed to update mentor profile'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    @action(detail=True, methods=['post'], parser_classes=[MultiPartParser, FormParser])
+    def upload_photo(self, request, pk=None):
+        """Upload mentor profile photo to Supabase storage"""
+        try:
+            # Verify ownership
+            mentor_data = supabase_client._client.table('mentors').select('*').eq('id', pk).single().execute().data
+            if not mentor_data or mentor_data['user_id'] != request.user.id:
+                return Response(
+                    {'error': 'Not authorized to update this profile'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            photo_file = request.FILES.get('photo')
+            if not photo_file:
+                return Response(
+                    {'error': 'No photo file provided'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Validate file type
+            allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
+            if photo_file.content_type not in allowed_types:
+                return Response(
+                    {'error': 'Invalid file type. Only JPEG, PNG, and WebP images are allowed'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Validate file size (max 5MB)
+            if photo_file.size > 5 * 1024 * 1024:
+                return Response(
+                    {'error': 'File too large. Maximum size is 5MB'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Upload to Supabase storage
+            photo_url = supabase_client.upload_mentor_photo(pk, photo_file)
+            
+            # Update mentor profile with new photo URL
+            update_data = {'photo_url': photo_url}
+            updated_mentor = supabase_client.update_mentor_profile(
+                pk,
+                update_data,
+                mentor_data['version']
+            )
+            
+            # Clear cache
+            cache.delete(f'mentor_profile_{pk}')
+            
+            return Response({
+                'photo_url': photo_url,
+                'mentor': updated_mentor
+            })
+        except Exception as e:
+            logger.error(f"Error uploading photo for mentor {pk}: {e}")
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
             updated_data = supabase_client.update_mentor_profile(
                 pk,
                 serializer.validated_data,
