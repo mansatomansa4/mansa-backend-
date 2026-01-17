@@ -195,7 +195,143 @@ class SupabaseMentorshipClient:
             logger.error(f"Error fetching mentors: {e}")
             raise
     
+    def get_mentors_with_member_data(self, filters: Dict = None, pagination: Dict = None) -> Dict:
+        """
+        Get all approved mentors enriched with member data.
+        Joins mentors table with users and members tables for complete profile information.
+        Returns: {'data': [...], 'count': total_count}
+        """
+        try:
+            # First get mentors
+            mentors_result = self.get_all_mentors(filters, pagination)
+            mentors = mentors_result['data']
+            
+            if not mentors:
+                return mentors_result
+            
+            # Get user IDs from mentors
+            user_ids = [m['user_id'] for m in mentors]
+            
+            # Query users table with their emails
+            users_query = self._client.table('users_user').select('id, email, first_name, last_name, phone_number').in_('id', user_ids)
+            users_response = self._circuit_breaker.call(lambda: users_query.execute())
+            users_dict = {u['id']: u for u in users_response.data}
+            
+            # Query members table to get additional data
+            emails = [u['email'] for u in users_response.data if u.get('email')]
+            if emails:
+                members_query = self._client.table('members').select('*').in_('email', emails)
+                members_response = self._circuit_breaker.call(lambda: members_query.execute())
+                members_dict = {m['email']: m for m in members_response.data}
+            else:
+                members_dict = {}
+            
+            # Enrich mentor data
+            for mentor in mentors:
+                user_data = users_dict.get(mentor['user_id'], {})
+                member_data = members_dict.get(user_data.get('email', ''), {})
+                
+                # Add user info
+                mentor['user'] = {
+                    'id': user_data.get('id'),
+                    'email': user_data.get('email', ''),
+                    'first_name': user_data.get('first_name', ''),
+                    'last_name': user_data.get('last_name', ''),
+                    'phone_number': user_data.get('phone_number', ''),
+                    'full_name': f"{user_data.get('first_name', '')} {user_data.get('last_name', '')}".strip()
+                }
+                
+                # Add member info (additional profile details)
+                mentor['member'] = {
+                    'name': member_data.get('name', mentor['user']['full_name']),
+                    'country': member_data.get('country'),
+                    'city': member_data.get('city'),
+                    'linkedin': member_data.get('linkedin'),
+                    'experience': member_data.get('experience'),
+                    'areaOfExpertise': member_data.get('areaOfExpertise'),
+                    'school': member_data.get('school'),
+                    'occupation': member_data.get('occupation'),
+                    'jobtitle': member_data.get('jobtitle'),
+                    'industry': member_data.get('industry'),
+                    'skills': member_data.get('skills'),
+                } if member_data else None
+            
+            return mentors_result
+            
+        except Exception as e:
+            logger.error(f"Error fetching mentors with member data: {e}")
+            raise
+    
+    def sync_mentor_from_member(self, member_email: str, user_id: int) -> Optional[Dict]:
+        """
+        Create or update mentor profile based on member data.
+        Used for automatic sync when membershiptype is 'mentor'.
+        """
+        try:
+            # Check if mentor already exists
+            existing_mentor = self.get_mentor_by_user_id(user_id)
+            if existing_mentor:
+                logger.info(f"Mentor profile already exists for user_id {user_id}")
+                return existing_mentor
+            
+            # Get member data
+            member_response = self._circuit_breaker.call(
+                lambda: self._client.table('members')
+                .select('*')
+                .eq('email', member_email)
+                .eq('membershiptype', 'mentor')
+                .single()
+                .execute()
+            )
+            
+            if not member_response.data:
+                logger.warning(f"No member found with email {member_email} and membershiptype='mentor'")
+                return None
+            
+            member = member_response.data
+            
+            # Prepare mentor profile data
+            expertise = []
+            if member.get('areaOfExpertise'):
+                expertise.append(member['areaOfExpertise'])
+            if member.get('industry'):
+                expertise.append(member['industry'])
+            if member.get('skills'):
+                skills_list = [s.strip() for s in member['skills'].split(',') if s.strip()]
+                expertise.extend(skills_list[:3])
+            
+            expertise = list(set(expertise))  # Remove duplicates
+            
+            # Create bio
+            bio_parts = []
+            if member.get('experience'):
+                bio_parts.append(f"Experience: {member['experience']}")
+            if member.get('occupation'):
+                bio_parts.append(f"Occupation: {member['occupation']}")
+            if member.get('jobtitle'):
+                bio_parts.append(f"Job Title: {member['jobtitle']}")
+            
+            bio = " | ".join(bio_parts) if bio_parts else "Experienced mentor ready to help you grow."
+            
+            # Create mentor profile
+            mentor_data = {
+                'user_id': user_id,
+                'bio': bio,
+                'expertise': expertise,
+                'is_approved': True,  # Auto-approve mentors from members table
+                'rating': 0.00,
+                'total_sessions': 0,
+                'version': 1
+            }
+            
+            return self.create_mentor_profile(mentor_data)
+            
+        except Exception as e:
+            logger.error(f"Error syncing mentor from member {member_email}: {e}")
+            raise
+    
     # ========== AVAILABILITY OPERATIONS ==========
+
     
     def get_availability_slots(self, mentor_id: str, date_range: Dict = None) -> List[Dict]:
         """Get availability slots for a mentor"""

@@ -70,24 +70,11 @@ class MentorViewSet(viewsets.ViewSet):
         }
         
         try:
-            result = supabase_client.get_all_mentors(filters, pagination)
-            
-            # Enrich with user data
-            mentors_data = result['data']
-            user_ids = [m['user_id'] for m in mentors_data]
-            users = User.objects.filter(id__in=user_ids).values('id', 'email', 'first_name', 'last_name')
-            users_dict = {u['id']: u for u in users}
-            
-            for mentor in mentors_data:
-                user_data = users_dict.get(mentor['user_id'], {})
-                mentor['user'] = {
-                    'email': user_data.get('email', ''),
-                    'first_name': user_data.get('first_name', ''),
-                    'last_name': user_data.get('last_name', '')
-                }
+            # Use enriched method that includes member data
+            result = supabase_client.get_mentors_with_member_data(filters, pagination)
             
             response_data = {
-                'results': mentors_data,
+                'results': result['data'],
                 'count': result['count'],
                 'page': pagination['page'],
                 'page_size': pagination['page_size']
