@@ -12,6 +12,14 @@
 ALTER TABLE mentors 
 ADD COLUMN IF NOT EXISTS member_id uuid REFERENCES members(id) ON DELETE CASCADE;
 
+-- Drop the unique constraint on user_id if it exists (causes conflicts with placeholder values)
+ALTER TABLE mentors 
+DROP CONSTRAINT IF EXISTS mentors_user_id_key;
+
+-- Make user_id nullable since member_id is now the primary reference
+ALTER TABLE mentors 
+ALTER COLUMN user_id DROP NOT NULL;
+
 -- Add unique constraint to prevent duplicate mentor profiles per member
 ALTER TABLE mentors
 ADD CONSTRAINT mentors_member_id_unique UNIQUE (member_id);
@@ -37,7 +45,7 @@ BEGIN
                 updated_at
             ) VALUES (
                 NEW.id,
-                0, -- Placeholder user_id (we'll handle this separately)
+                NULL, -- user_id is now nullable, member_id is the primary reference
                 NEW.bio,
                 NEW.profile_picture,
                 COALESCE(
@@ -100,7 +108,7 @@ INSERT INTO mentors (
 )
 SELECT 
     m.id,
-    0, -- Placeholder user_id
+    NULL, -- user_id is now nullable, member_id is the primary reference
     m.bio,
     m.profile_picture,
     COALESCE(
