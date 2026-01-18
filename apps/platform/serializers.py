@@ -45,12 +45,6 @@ class MemberSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at', 'updated_at']  # UUID and timestamps are auto-generated
 
 
-class CommunityMemberSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = models.CommunityMember
-        fields = "__all__"
-
-
 class ResearchCohortApplicationSerializer(serializers.ModelSerializer):
     """Serializer for Research Cohort Applications"""
 

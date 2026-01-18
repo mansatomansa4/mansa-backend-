@@ -6,7 +6,7 @@ from django.db.models import Count
 from django.utils import timezone
 
 from apps.emails.models import EmailCampaign, EmailLog
-from apps.projects.models import Project, ProjectApplication
+from apps.platform.models import Project, ProjectApplication
 from apps.users.models import User
 
 

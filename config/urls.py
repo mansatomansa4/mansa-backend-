@@ -70,7 +70,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/", include("apps.core.urls")),
     path("api/users/", include("apps.users.urls")),
-    path("api/", include("apps.projects.urls")),
+    # path("api/", include("apps.projects.urls")),  # REMOVED: Using apps.platform instead
     path("api/platform/", include("apps.platform.urls")),
     path("api/", include("apps.emails.urls")),
     path("api/", include("apps.events.urls")),

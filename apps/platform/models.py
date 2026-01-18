@@ -53,27 +53,39 @@ class AdminAuditLog(models.Model):
 
 
 class Member(models.Model):
+    """Unified Member model combining members and community_members tables"""
     id = models.UUIDField(primary_key=True)
+    
+    # Core fields
     name = models.TextField()
     email = models.TextField()
-    phone = models.TextField()
+    phone = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    
+    # Member table specific fields
     country = models.TextField(null=True, blank=True)
     city = models.TextField(null=True, blank=True)
     linkedin = models.TextField(null=True, blank=True)
     experience = models.TextField(null=True, blank=True)
-    areaOfExpertise = models.TextField(null=True, blank=True)
+    areaofexpertise = models.TextField(null=True, blank=True, db_column='areaofexpertise')
     school = models.TextField(null=True, blank=True)
     level = models.TextField(null=True, blank=True)
     occupation = models.TextField(null=True, blank=True)
     jobtitle = models.TextField(null=True, blank=True)
     industry = models.TextField(null=True, blank=True)
     major = models.TextField(null=True, blank=True)
-    gender = models.TextField()
-    membershiptype = models.TextField()
-    created_at = models.DateTimeField(null=True, blank=True)
+    gender = models.TextField(null=True, blank=True)
+    membershiptype = models.TextField(null=True, blank=True)
     skills = models.TextField(null=True, blank=True)
-    is_active = models.BooleanField(default=True)
-    updated_at = models.DateTimeField(null=True, blank=True)
+    
+    # Community_members table specific fields (merged)
+    joined_date = models.DateTimeField(null=True, blank=True)
+    profile_picture = models.TextField(null=True, blank=True)
+    bio = models.TextField(null=True, blank=True)
+    location = models.TextField(null=True, blank=True)
+    motivation = models.TextField(null=True, blank=True)
 
     class Meta:
         db_table = "members"
@@ -83,28 +95,6 @@ class Member(models.Model):
 
     def __str__(self):
         return f"{self.name} <{self.email}>"
-
-
-class CommunityMember(models.Model):
-    id = models.UUIDField(primary_key=True)
-    name = models.TextField()
-    email = models.TextField(unique=True)
-    phone = models.TextField(null=True, blank=True)
-    joined_date = models.DateTimeField(null=True, blank=True)
-    is_active = models.BooleanField(default=True)
-    profile_picture = models.TextField(null=True, blank=True)
-    bio = models.TextField(null=True, blank=True)
-    location = models.TextField(null=True, blank=True)
-    skills = models.TextField(null=True, blank=True)
-    created_at = models.DateTimeField(null=True, blank=True)
-    updated_at = models.DateTimeField(null=True, blank=True)
-    motivation = models.TextField(null=True, blank=True)
-
-    class Meta:
-        db_table = "community_members"
-        managed = False
-        verbose_name = "Community Member"
-        verbose_name_plural = "Community Members"
 
 
 class Project(models.Model):

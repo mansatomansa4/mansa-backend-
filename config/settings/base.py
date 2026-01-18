@@ -34,7 +34,7 @@ INSTALLED_APPS = [
     "apps.core",
     "apps.users",
     "apps.platform",
-    "apps.projects",
+    # "apps.projects",  # REMOVED: Duplicate models - using Supabase tables via apps.platform instead
     "apps.emails",
     "apps.events",
     "apps.mentorship",

@@ -11,7 +11,6 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from .models import (
-    CommunityMember,
     EducationCohortApplication,
     Member,
     Project,
@@ -19,7 +18,6 @@ from .models import (
     ResearchCohortApplication,
 )
 from .serializers import (
-    CommunityMemberSerializer,
     EducationCohortApplicationCreateSerializer,
     EducationCohortApplicationSerializer,
     MemberSerializer,
@@ -405,12 +403,6 @@ class MemberViewSet(DatabaseGuardMixin, mixins.CreateModelMixin, viewsets.ReadOn
         }
 
         return Response(analytics_data)
-
-
-class CommunityMemberViewSet(DatabaseGuardMixin, viewsets.ReadOnlyModelViewSet):
-    queryset = CommunityMember.objects.all().order_by("-created_at")
-    serializer_class = CommunityMemberSerializer
-    permission_classes = [IsAuthenticated]
 
 
 class ProjectApplicationViewSet(
