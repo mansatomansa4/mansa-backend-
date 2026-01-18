@@ -198,56 +198,70 @@ class SupabaseMentorshipClient:
     def get_mentors_with_member_data(self, filters: Dict = None, pagination: Dict = None) -> Dict:
         """
         Get all approved mentors enriched with member data.
-        Joins mentors table with users and members tables for complete profile information.
+        Uses member_id foreign key for direct joining.
         Returns: {'data': [...], 'count': total_count}
         """
         try:
-            # First get mentors
-            mentors_result = self.get_all_mentors(filters, pagination)
-            mentors = mentors_result['data']
+            # Build the query with member data join
+            # Note: Supabase allows foreign key expansion
+            query = (
+                self._client.table('mentors')
+                .select('*, member:member_id(*)', count='exact')
+                .eq('is_approved', True)
+            )
             
-            if not mentors:
-                return mentors_result
+            # Apply filters
+            if filters:
+                if 'id' in filters:
+                    query = query.eq('id', filters['id'])
+                if 'expertise' in filters and filters['expertise']:
+                    # JSONB contains query
+                    query = query.contains('expertise', filters['expertise'])
+                if 'min_rating' in filters:
+                    query = query.gte('rating', filters['min_rating'])
             
-            # Get user IDs from mentors
-            user_ids = [m['user_id'] for m in mentors]
+            # Apply pagination
+            if pagination:
+                page = pagination.get('page', 1)
+                page_size = pagination.get('page_size', 12)
+                start = (page - 1) * page_size
+                end = start + page_size - 1
+                query = query.range(start, end)
             
-            # Query users table with their emails
-            users_query = self._client.table('users_user').select('id, email, first_name, last_name, phone_number').in_('id', user_ids)
-            users_response = self._circuit_breaker.call(lambda: users_query.execute())
-            users_dict = {u['id']: u for u in users_response.data}
+            response = self._circuit_breaker.call(lambda: query.execute())
             
-            # Query members table to get additional data
-            emails = [u['email'] for u in users_response.data if u.get('email')]
-            if emails:
-                members_query = self._client.table('members').select('*').in_('email', emails)
-                members_response = self._circuit_breaker.call(lambda: members_query.execute())
-                members_dict = {m['email']: m for m in members_response.data}
-            else:
-                members_dict = {}
-            
-            # Enrich mentor data
-            for mentor in mentors:
-                user_data = users_dict.get(mentor['user_id'], {})
-                member_data = members_dict.get(user_data.get('email', ''), {})
+            # Enrich the data structure
+            enriched_data = []
+            for mentor in response.data:
+                member_data = mentor.pop('member', {}) if mentor.get('member') else {}
                 
-                # Add user info
-                mentor['user'] = {
-                    'id': user_data.get('id'),
-                    'email': user_data.get('email', ''),
-                    'first_name': user_data.get('first_name', ''),
-                    'last_name': user_data.get('last_name', ''),
-                    'phone_number': user_data.get('phone_number', ''),
-                    'full_name': f"{user_data.get('first_name', '')} {user_data.get('last_name', '')}".strip()
+                enriched_mentor = {
+                    **mentor,
+                    'name': member_data.get('name', ''),
+                    'email': member_data.get('email', ''),
+                    'phone': member_data.get('phone', ''),
+                    'country': member_data.get('country', ''),
+                    'city': member_data.get('city', ''),
+                    'linkedin': member_data.get('linkedin', ''),
+                    'experience': member_data.get('experience', ''),
+                    'areaofexpertise': member_data.get('areaofexpertise', ''),
+                    'school': member_data.get('school', ''),
+                    'occupation': member_data.get('occupation', ''),
+                    'jobtitle': member_data.get('jobtitle', ''),
+                    'skills': member_data.get('skills', ''),
+                    'location': member_data.get('location', ''),
+                    'member_data': member_data  # Keep full member data for reference
                 }
-                
-                # Add member info (additional profile details)
-                mentor['member'] = {
-                    'name': member_data.get('name', mentor['user']['full_name']),
-                    'country': member_data.get('country'),
-                    'city': member_data.get('city'),
-                    'linkedin': member_data.get('linkedin'),
-                    'experience': member_data.get('experience'),
+                enriched_data.append(enriched_mentor)
+            
+            return {
+                'data': enriched_data,
+                'count': response.count
+            }
+        except Exception as e:
+            logger.error(f"Error fetching mentors with member data: {e}")
+            # Fallback to old method if new approach fails
+            return self.get_all_mentors(filters, pagination)
                     'areaOfExpertise': member_data.get('areaOfExpertise'),
                     'school': member_data.get('school'),
                     'occupation': member_data.get('occupation'),
