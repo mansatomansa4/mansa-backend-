@@ -262,19 +262,6 @@ class SupabaseMentorshipClient:
             logger.error(f"Error fetching mentors with member data: {e}")
             # Fallback to old method if new approach fails
             return self.get_all_mentors(filters, pagination)
-                    'areaOfExpertise': member_data.get('areaOfExpertise'),
-                    'school': member_data.get('school'),
-                    'occupation': member_data.get('occupation'),
-                    'jobtitle': member_data.get('jobtitle'),
-                    'industry': member_data.get('industry'),
-                    'skills': member_data.get('skills'),
-                } if member_data else None
-            
-            return mentors_result
-            
-        except Exception as e:
-            logger.error(f"Error fetching mentors with member data: {e}")
-            raise
     
     def sync_mentor_from_member(self, member_email: str, user_id: int) -> Optional[Dict]:
         """
