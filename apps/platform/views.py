@@ -177,7 +177,7 @@ class MemberViewSet(DatabaseGuardMixin, mixins.CreateModelMixin, viewsets.ReadOn
     queryset = Member.objects.all().order_by("-created_at")
     serializer_class = MemberSerializer
     permission_classes = [AllowAny]  # Allow public member registration
-    search_fields = ["name", "email", "skills", "areaOfExpertise", "occupation"]
+    search_fields = ["name", "email", "skills", "areaofexpertise", "occupation"]
     filterset_fields = ["country", "city", "membershiptype", "is_active", "gender"]
 
     def create(self, request, *args, **kwargs):
@@ -230,7 +230,7 @@ class MemberViewSet(DatabaseGuardMixin, mixins.CreateModelMixin, viewsets.ReadOn
                 city=data.get('city'),
                 linkedin=data.get('linkedin'),
                 experience=data.get('experience'),
-                areaOfExpertise=data.get('areaOfExpertise'),
+                areaofexpertise=data.get('areaOfExpertise') or data.get('areaofexpertise'),
                 school=data.get('school'),
                 level=data.get('level'),
                 occupation=data.get('occupation'),
