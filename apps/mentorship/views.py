@@ -43,7 +43,7 @@ class MentorViewSet(viewsets.ViewSet):
     ViewSet for mentor operations.
     Handles listing, retrieving, creating, and updating mentor profiles.
     """
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]  # Override per action in get_permissions
     parser_classes = [JSONParser, MultiPartParser, FormParser]
     
     def get_permissions(self):
@@ -138,7 +138,7 @@ class MentorViewSet(viewsets.ViewSet):
     
     @action(detail=False, methods=['get'])
     def my_profile(self, request):
-        """Get current user's mentor profile"""
+        """Get current user's mentor profile with user information"""
         try:
             mentor_data = supabase_client.get_mentor_by_user_id(request.user.id)
             if not mentor_data:
@@ -146,6 +146,15 @@ class MentorViewSet(viewsets.ViewSet):
                     {'error': 'Mentor profile not found'},
                     status=status.HTTP_404_NOT_FOUND
                 )
+            
+            # Add user information to the response
+            mentor_data['user'] = {
+                'name': f"{request.user.first_name} {request.user.last_name}".strip() or request.user.email,
+                'email': request.user.email,
+                'first_name': request.user.first_name,
+                'last_name': request.user.last_name
+            }
+            
             return Response(mentor_data)
         except Exception as e:
             logger.error(f"Error fetching mentor profile for user {request.user.id}: {e}")
@@ -494,6 +503,62 @@ class BookingViewSet(viewsets.ViewSet):
             logger.error(f"Error updating booking status: {e}")
             return Response(
                 {'error': 'Failed to update booking'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    @action(detail=True, methods=['patch'])
+    def add_meeting_link(self, request, pk=None):
+        """Add or update meeting link for a booking (mentor only)"""
+        meeting_link = request.data.get('meeting_link', '').strip()
+        meeting_platform = request.data.get('meeting_platform', 'zoom')
+        
+        if not meeting_link:
+            return Response(
+                {'error': 'Meeting link is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            # Get booking and verify ownership
+            booking_response = supabase_client._client.table('mentorship_bookings').select('*').eq('id', pk).single().execute()
+            if not booking_response.data:
+                return Response(
+                    {'error': 'Booking not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            booking = booking_response.data
+            
+            # Verify the current user is the mentor for this booking
+            mentor = supabase_client.get_mentor_by_user_id(request.user.id)
+            if not mentor or str(mentor['id']) != str(booking['mentor_id']):
+                return Response(
+                    {'error': 'Not authorized to update this booking'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            # Update booking with meeting link
+            update_data = {
+                'meeting_url': meeting_link,
+                'meeting_platform': meeting_platform,
+                'updated_at': timezone.now().isoformat()
+            }
+            
+            updated = supabase_client._client.table('mentorship_bookings').update(update_data).eq('id', pk).execute()
+            
+            if not updated.data:
+                raise Exception('Failed to update booking with meeting link')
+            
+            logger.info(f"Meeting link added to booking {pk} by mentor {request.user.id}")
+            
+            return Response({
+                'message': 'Meeting link added successfully',
+                'booking': updated.data[0]
+            })
+        except Exception as e:
+            logger.error(f"Error adding meeting link to booking {pk}: {e}")
+            return Response(
+                {'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
     
