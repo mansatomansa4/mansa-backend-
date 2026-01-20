@@ -331,6 +331,54 @@ class SupabaseMentorshipClient:
             logger.error(f"Error syncing mentor from member {member_email}: {e}")
             raise
     
+    def get_mentor_by_user_id(self, user_id: int) -> Optional[Dict]:
+        """
+        Get mentor profile by user_id.
+        Returns mentor data with member information or None if not found.
+        """
+        try:
+            # Query mentors table by user_id
+            response = self._circuit_breaker.call(
+                lambda: self._client.table('mentors')
+                .select('*, member:member_id(*)')
+                .eq('user_id', user_id)
+                .single()
+                .execute()
+            )
+            
+            if not response.data:
+                logger.info(f"No mentor profile found for user_id {user_id}")
+                return None
+            
+            mentor = response.data
+            
+            # Enrich with member data
+            member_data = mentor.pop('member', {}) if mentor.get('member') else {}
+            
+            enriched_mentor = {
+                **mentor,
+                'name': member_data.get('name', ''),
+                'email': member_data.get('email', ''),
+                'phone': member_data.get('phone', ''),
+                'country': member_data.get('country', ''),
+                'city': member_data.get('city', ''),
+                'linkedin': member_data.get('linkedin', ''),
+                'experience': member_data.get('experience', ''),
+                'areaofexpertise': member_data.get('areaofexpertise', ''),
+                'school': member_data.get('school', ''),
+                'occupation': member_data.get('occupation', ''),
+                'jobtitle': member_data.get('jobtitle', ''),
+                'skills': member_data.get('skills', ''),
+                'location': member_data.get('location', ''),
+                'member_data': member_data
+            }
+            
+            return enriched_mentor
+            
+        except Exception as e:
+            logger.error(f"Error fetching mentor by user_id {user_id}: {e}")
+            return None
+    
     # ========== AVAILABILITY OPERATIONS ==========
 
     
@@ -447,8 +495,8 @@ class SupabaseMentorshipClient:
             file_content = photo_file.read()
             
             # Upload to Supabase storage bucket
-            # Note: Bucket 'profile-pictures' should be created in Supabase dashboard
-            bucket_name = 'profile-pictures'
+            # Note: Using the 'mentors-profile' bucket created in Supabase dashboard
+            bucket_name = 'mentors-profile'
             
             # Upload file
             response = self._circuit_breaker.call(
@@ -476,7 +524,7 @@ class SupabaseMentorshipClient:
         """
         try:
             # Extract file path from URL
-            bucket_name = 'profile-pictures'
+            bucket_name = 'mentors-profile'
             # URL format: https://{project}.supabase.co/storage/v1/object/public/{bucket}/{path}
             if f'/object/public/{bucket_name}/' in photo_url:
                 file_path = photo_url.split(f'/object/public/{bucket_name}/')[1]
