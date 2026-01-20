@@ -124,6 +124,42 @@ class SupabaseMentorshipClient:
             logger.error(f"Error fetching mentor by user_id {user_id}: {e}")
             return None
     
+    def get_mentor_with_member_data(self, user_id: int) -> Optional[Dict]:
+        """Get mentor profile with related member data by Django user ID"""
+        try:
+            # First get the mentor profile
+            mentor_response = self._circuit_breaker.call(
+                lambda: self._client.table('mentors')
+                .select('*, members!mentors_member_id_fkey(name, email, jobtitle, occupation, experience, linkedin, areaofexpertise, phone, country, city)')
+                .eq('user_id', user_id)
+                .single()
+                .execute()
+            )
+            
+            if not mentor_response.data:
+                return None
+            
+            mentor_data = mentor_response.data
+            member_info = mentor_data.pop('members', None)
+            
+            # Map member fields to mentor profile fields
+            if member_info:
+                mentor_data['job_title'] = member_info.get('jobtitle') or ''
+                mentor_data['company'] = member_info.get('occupation') or ''
+                mentor_data['years_of_experience'] = int(member_info.get('experience') or 0) if member_info.get('experience', '').isdigit() else 0
+                mentor_data['linkedin_url'] = member_info.get('linkedin') or ''
+                mentor_data['member_name'] = member_info.get('name') or ''
+                mentor_data['member_email'] = member_info.get('email') or ''
+                mentor_data['phone'] = member_info.get('phone') or ''
+                mentor_data['country'] = member_info.get('country') or ''
+                mentor_data['city'] = member_info.get('city') or ''
+            
+            return mentor_data
+        except Exception as e:
+            logger.error(f"Error fetching mentor with member data for user_id {user_id}: {e}")
+            # Fallback to basic mentor data
+            return self.get_mentor_by_user_id(user_id)
+
     def create_mentor_profile(self, data: Dict) -> Optional[Dict]:
         """Create new mentor profile"""
         try:
