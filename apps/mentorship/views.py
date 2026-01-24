@@ -27,6 +27,10 @@ from .serializers import (
     MentorStatsSerializer
 )
 from .supabase_client import supabase_client
+from .tasks import (
+    send_mentor_booking_notification,
+    send_booking_status_update_email,
+)
 from apps.users.models import User
 
 logger = logging.getLogger(__name__)
@@ -460,6 +464,14 @@ class BookingViewSet(viewsets.ViewSet):
             with connection.cursor() as cursor:
                 cursor.execute("SELECT pg_advisory_unlock(%s)", [lock_id])
             
+            # Send email notification to mentor about new booking request
+            if booking and booking.get('id'):
+                try:
+                    send_mentor_booking_notification.delay(str(booking['id']))
+                    logger.info(f"Triggered mentor notification email for booking {booking['id']}")
+                except Exception as email_error:
+                    logger.error(f"Failed to trigger mentor notification email: {email_error}")
+            
             return Response(booking, status=status.HTTP_201_CREATED)
         except Exception as e:
             # Ensure lock is released
@@ -488,12 +500,30 @@ class BookingViewSet(viewsets.ViewSet):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         
+        new_status = serializer.validated_data['status']
+        
+        # Get current booking to determine old status
+        try:
+            current_booking = supabase_client._client.table('mentorship_bookings').select('status').eq('id', pk).single().execute()
+            old_status = current_booking.data.get('status', 'pending') if current_booking.data else 'pending'
+        except Exception:
+            old_status = 'pending'
+        
         try:
             updated_booking = supabase_client.update_booking_status(
                 pk,
-                serializer.validated_data['status'],
+                new_status,
                 serializer.validated_data['version']
             )
+            
+            # Send email notification to mentee when mentor confirms the booking
+            if updated_booking and old_status != new_status:
+                try:
+                    send_booking_status_update_email.delay(str(pk), old_status, new_status)
+                    logger.info(f"Triggered status update email for booking {pk}: {old_status} -> {new_status}")
+                except Exception as email_error:
+                    logger.error(f"Failed to trigger status update email: {email_error}")
+            
             return Response(updated_booking)
         except Exception as e:
             if 'version mismatch' in str(e).lower():

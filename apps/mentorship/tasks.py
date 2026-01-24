@@ -272,55 +272,151 @@ def send_booking_status_update_email(booking_id: str, old_status: str, new_statu
         session_date = datetime.fromisoformat(booking['session_date']).strftime('%B %d, %Y')
         start_time = datetime.fromisoformat(booking['start_time']).strftime('%I:%M %p')
         
-        # Status-specific messages
-        status_messages = {
-            'confirmed': {
-                'subject': f"Session Confirmed - {session_date}",
-                'body': f"Your mentorship session has been confirmed by {mentor_user.first_name}!"
-            },
-            'cancelled_by_mentor': {
-                'subject': f"Session Cancelled - {session_date}",
-                'body': f"Unfortunately, {mentor_user.first_name} had to cancel the session. Please reschedule at your convenience."
-            },
-            'cancelled_by_mentee': {
-                'subject': f"Session Cancelled - {session_date}",
-                'body': f"{mentee.first_name} has cancelled the session."
-            },
-            'completed': {
-                'subject': f"Session Completed - {session_date}",
-                'body': "Thank you for completing your mentorship session! Please consider leaving feedback."
-            }
-        }
+        # Get end time for full time range display
+        end_time = datetime.fromisoformat(booking['end_time']).strftime('%I:%M %p') if booking.get('end_time') else ''
+        time_display = f"{start_time} - {end_time}" if end_time else start_time
         
-        status_info = status_messages.get(new_status)
-        if not status_info:
-            return
-        
-        # Send to appropriate recipient
-        recipient = mentee.email if 'mentor' not in new_status else mentor_user.email
-        recipient_name = mentee.first_name if 'mentor' not in new_status else mentor_user.first_name
-        
-        message = f"""
-Hello {recipient_name},
+        # Handle confirmed status - send detailed confirmation to mentee
+        if new_status == 'confirmed':
+            # Send confirmation email to mentee
+            mentee_message = f"""
+Hello {mentee.first_name},
 
-{status_info['body']}
+Great news! Your mentorship session has been CONFIRMED by {mentor_user.first_name} {mentor_user.last_name}!
+
+🎉 SESSION CONFIRMED
 
 Session Details:
-- Topic: {booking['topic']}
-- Date: {session_date}
-- Time: {start_time}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📅 Date: {session_date}
+⏰ Time: {time_display}
+👨‍🏫 Mentor: {mentor_user.first_name} {mentor_user.last_name}
+📝 Topic: {booking['topic']}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{f"🔗 Meeting Link: {booking.get('meeting_link') or booking.get('meeting_url')}" if booking.get('meeting_link') or booking.get('meeting_url') else "Your mentor will share the meeting link before the session."}
+
+What to do next:
+• Add this session to your calendar
+• Prepare any questions or topics you'd like to discuss
+• Join the meeting on time
+
+You can view and manage your bookings from your Mansa dashboard.
 
 Best regards,
 Mansa Mentorship Team
-        """
+            """
+            
+            send_mail(
+                subject=f"🎉 Session Confirmed with {mentor_user.first_name} - {session_date}",
+                message=mentee_message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[mentee.email],
+                fail_silently=False,
+            )
+            
+            logger.info(f"Confirmation email sent to mentee {mentee.email} for booking {booking_id}")
+            return True
         
-        send_mail(
-            subject=status_info['subject'],
-            message=message,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[recipient],
-            fail_silently=False,
-        )
+        # Handle cancellation by mentor - notify mentee
+        elif new_status == 'cancelled_by_mentor':
+            mentee_message = f"""
+Hello {mentee.first_name},
+
+Unfortunately, your mentorship session has been cancelled by {mentor_user.first_name}.
+
+Cancelled Session Details:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📅 Date: {session_date}
+⏰ Time: {time_display}
+👨‍🏫 Mentor: {mentor_user.first_name} {mentor_user.last_name}
+📝 Topic: {booking['topic']}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{f"Reason: {booking.get('cancellation_reason')}" if booking.get('cancellation_reason') else ""}
+
+We apologize for the inconvenience. You can browse other available mentors and book a new session from your Mansa dashboard.
+
+Best regards,
+Mansa Mentorship Team
+            """
+            
+            send_mail(
+                subject=f"Session Cancelled - {session_date}",
+                message=mentee_message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[mentee.email],
+                fail_silently=False,
+            )
+            
+            logger.info(f"Cancellation email sent to mentee {mentee.email} for booking {booking_id}")
+            return True
+        
+        # Handle cancellation by mentee - notify mentor
+        elif new_status == 'cancelled_by_mentee':
+            mentor_message = f"""
+Hello {mentor_user.first_name},
+
+A mentorship session has been cancelled by the mentee.
+
+Cancelled Session Details:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📅 Date: {session_date}
+⏰ Time: {time_display}
+👤 Mentee: {mentee.first_name} {mentee.last_name}
+📝 Topic: {booking['topic']}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{f"Reason: {booking.get('cancellation_reason')}" if booking.get('cancellation_reason') else ""}
+
+Your time slot is now available for other bookings.
+
+Best regards,
+Mansa Mentorship Team
+            """
+            
+            send_mail(
+                subject=f"Session Cancelled by Mentee - {session_date}",
+                message=mentor_message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[mentor_user.email],
+                fail_silently=False,
+            )
+            
+            logger.info(f"Cancellation email sent to mentor {mentor_user.email} for booking {booking_id}")
+            return True
+        
+        # Handle session completed - notify both
+        elif new_status == 'completed':
+            # Notify mentee
+            mentee_message = f"""
+Hello {mentee.first_name},
+
+Thank you for completing your mentorship session!
+
+Completed Session:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📅 Date: {session_date}
+👨‍🏫 Mentor: {mentor_user.first_name} {mentor_user.last_name}
+📝 Topic: {booking['topic']}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+We'd love to hear your feedback! Please take a moment to rate your session and leave a review for your mentor.
+
+Best regards,
+Mansa Mentorship Team
+            """
+            
+            send_mail(
+                subject=f"Session Completed - Thank You! - {session_date}",
+                message=mentee_message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[mentee.email],
+                fail_silently=False,
+            )
+            
+            logger.info(f"Completion email sent to mentee {mentee.email} for booking {booking_id}")
+            return True
         
         logger.info(f"Status update email sent for booking {booking_id}: {old_status} -> {new_status}")
         return True
