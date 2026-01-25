@@ -126,41 +126,75 @@ class SupabaseMentorshipClient:
             logger.error(f"Error fetching mentor by user_id {user_id}: {e}")
             return None
     
-    def get_mentor_with_member_data(self, user_id: int) -> Optional[Dict]:
-        """Get mentor profile with related member data by Django user ID"""
+    def get_mentor_with_member_data(self, user_id: int, email: str = None) -> Optional[Dict]:
+        """
+        Get mentor profile with related member data by Django user ID or email.
+        If user_id lookup fails and email is provided, lookup through members table.
+        """
         try:
-            # First get the mentor profile
-            mentor_response = self._circuit_breaker.call(
+            # First try to query by user_id
+            response = self._circuit_breaker.call(
                 lambda: self._client.table('mentors')
-                .select('*, members!mentors_member_id_fkey(name, email, jobtitle, occupation, experience, linkedin, areaofexpertise, phone, country, city)')
+                .select('*, member:member_id(*)')
                 .eq('user_id', user_id)
-                .single()
                 .execute()
             )
             
-            if not mentor_response.data:
+            mentor = None
+            if response.data and len(response.data) > 0:
+                mentor = response.data[0]
+            elif email:
+                logger.info(f"No mentor found by user_id {user_id}, trying email lookup: {email}")
+                # Get member by email first
+                member_response = self._circuit_breaker.call(
+                    lambda: self._client.table('members')
+                    .select('id')
+                    .eq('email', email)
+                    .execute()
+                )
+                
+                if not member_response.data or len(member_response.data) == 0:
+                    logger.info(f"No member found with email {email}")
+                    return None
+                
+                member_id = member_response.data[0]['id']
+                
+                # Now get mentor by member_id
+                mentor_response = self._circuit_breaker.call(
+                    lambda: self._client.table('mentors')
+                    .select('*, member:member_id(*)')
+                    .eq('member_id', member_id)
+                    .execute()
+                )
+                
+                if not mentor_response.data or len(mentor_response.data) == 0:
+                    logger.info(f"No mentor profile found for member_id {member_id}")
+                    return None
+                
+                mentor = mentor_response.data[0]
+            else:
                 return None
             
-            mentor_data = mentor_response.data
-            member_info = mentor_data.pop('members', None)
-            
             # Map member fields to mentor profile fields
-            if member_info:
-                mentor_data['job_title'] = member_info.get('jobtitle') or ''
-                mentor_data['company'] = member_info.get('occupation') or ''
-                mentor_data['years_of_experience'] = int(member_info.get('experience') or 0) if member_info.get('experience', '').isdigit() else 0
-                mentor_data['linkedin_url'] = member_info.get('linkedin') or ''
-                mentor_data['member_name'] = member_info.get('name') or ''
-                mentor_data['member_email'] = member_info.get('email') or ''
-                mentor_data['phone'] = member_info.get('phone') or ''
-                mentor_data['country'] = member_info.get('country') or ''
-                mentor_data['city'] = member_info.get('city') or ''
+            member_info = mentor.pop('member', {}) if mentor.get('member') else {}
             
-            return mentor_data
+            if member_info:
+                mentor['job_title'] = member_info.get('jobtitle') or ''
+                mentor['company'] = member_info.get('occupation') or ''
+                mentor['years_of_experience'] = int(member_info.get('experience') or 0) if str(member_info.get('experience', '')).isdigit() else 0
+                mentor['linkedin_url'] = member_info.get('linkedin') or ''
+                mentor['member_name'] = member_info.get('name') or ''
+                mentor['member_email'] = member_info.get('email') or ''
+                mentor['phone'] = member_info.get('phone') or ''
+                mentor['country'] = member_info.get('country') or ''
+                mentor['city'] = member_info.get('city') or ''
+                mentor['area_of_expertise'] = member_info.get('areaofexpertise') or ''
+            
+            return mentor
         except Exception as e:
             logger.error(f"Error fetching mentor with member data for user_id {user_id}: {e}")
-            # Fallback to basic mentor data
-            return self.get_mentor_by_user_id(user_id)
+            # Fallback to get_mentor_by_user_id with email
+            return self.get_mentor_by_user_id(user_id, email)
 
     def create_mentor_profile(self, data: Dict) -> Optional[Dict]:
         """Create new mentor profile"""
@@ -509,10 +543,9 @@ class SupabaseMentorshipClient:
                 lambda: self._client.table('mentor_availability')
                 .select('*')
                 .eq('id', slot_id)
-                .single()
                 .execute()
             )
-            return response.data if response.data else None
+            return response.data[0] if response.data and len(response.data) > 0 else None
         except Exception as e:
             logger.error(f"Error fetching availability slot {slot_id}: {e}")
             return None
@@ -763,36 +796,14 @@ class SupabaseMentorshipClient:
 
     def get_mentor_reviews(self, mentor_id: str, limit: int = 10, page: int = 1, page_size: int = 10) -> List[Dict]:
         """Get reviews for a mentor with pagination"""
-        try:
-            start = (page - 1) * page_size
-            end = start + page_size - 1
-
-            response = self._circuit_breaker.call(
-                lambda: self._client.table('mentorship_reviews')
-                .select('*, mentee:mentee_id(id, email, first_name, last_name)')
-                .eq('mentor_id', mentor_id)
-                .order('created_at', desc=True)
-                .range(start, end)
-                .execute()
-            )
-            return response.data if response.data else []
-        except Exception as e:
-            logger.error(f"Error fetching reviews for mentor {mentor_id}: {e}")
-            return []
-
+        # NOTE: mentorship_reviews table doesn't exist in the database
+        # Returning empty list until table is created
+        return []
+        
     def get_mentor_review_count(self, mentor_id: str) -> int:
         """Get total review count for a mentor"""
-        try:
-            response = self._circuit_breaker.call(
-                lambda: self._client.table('mentorship_reviews')
-                .select('id', count='exact')
-                .eq('mentor_id', mentor_id)
-                .execute()
-            )
-            return response.count or 0
-        except Exception as e:
-            logger.error(f"Error counting reviews for mentor {mentor_id}: {e}")
-            return 0
+        # NOTE: mentorship_reviews table doesn't exist in the database
+        return 0
 
     def create_review(self, data: Dict) -> Optional[Dict]:
         """Create a new review for a mentor"""
@@ -856,11 +867,12 @@ class SupabaseMentorshipClient:
                 lambda: self._client.table('mentors')
                 .select('total_sessions')
                 .eq('id', mentor_id)
-                .single()
                 .execute()
             )
 
-            current_sessions = mentor_response.data.get('total_sessions', 0) if mentor_response.data else 0
+            current_sessions = 0
+            if mentor_response.data and len(mentor_response.data) > 0:
+                current_sessions = mentor_response.data[0].get('total_sessions', 0)
 
             # Update count
             self._circuit_breaker.call(
@@ -1002,10 +1014,9 @@ class SupabaseMentorshipClient:
                 lambda: self._client.table('mentorship_bookings')
                 .select('*')
                 .eq('id', booking_id)
-                .single()
                 .execute()
             )
-            return response.data if response.data else None
+            return response.data[0] if response.data and len(response.data) > 0 else None
         except Exception as e:
             logger.error(f"Error fetching booking {booking_id}: {e}")
             return None
@@ -1144,11 +1155,10 @@ class SupabaseMentorshipClient:
                     lambda: self._client.table('mentors')
                     .select('*, member:member_id(name, email, jobtitle, occupation)')
                     .eq('id', booking['mentor_id'])
-                    .single()
                     .execute()
                 )
-                if mentor_response.data:
-                    mentor = mentor_response.data
+                if mentor_response.data and len(mentor_response.data) > 0:
+                    mentor = mentor_response.data[0]
                     member_data = mentor.pop('member', {}) if mentor.get('member') else {}
                     enriched['mentor'] = {
                         'id': mentor.get('id'),

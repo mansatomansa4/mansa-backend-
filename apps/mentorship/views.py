@@ -164,7 +164,7 @@ class MentorViewSet(viewsets.ViewSet):
     def my_profile(self, request):
         """Get current user's mentor profile with full details"""
         try:
-            mentor_data = supabase_client.get_mentor_with_member_data(request.user.id)
+            mentor_data = supabase_client.get_mentor_with_member_data(request.user.id, request.user.email)
             if not mentor_data:
                 return Response(
                     {'error': 'Mentor profile not found. Please create one first.'},
