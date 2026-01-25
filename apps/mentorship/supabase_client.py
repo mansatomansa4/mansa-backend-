@@ -116,10 +116,12 @@ class SupabaseMentorshipClient:
                 lambda: self._client.table('mentors')
                 .select('*')
                 .eq('user_id', user_id)
-                .single()
                 .execute()
             )
-            return response.data if response.data else None
+            # Return first result if exists, otherwise None
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            return None
         except Exception as e:
             logger.error(f"Error fetching mentor by user_id {user_id}: {e}")
             return None
@@ -305,7 +307,7 @@ class SupabaseMentorshipClient:
         Used for automatic sync when membershiptype contains 'mentor'.
         """
         try:
-            # Check if mentor already exists
+            # Check if mentor already exists by user_id
             existing_mentor = self.get_mentor_by_user_id(user_id)
             if existing_mentor:
                 logger.info(f"Mentor profile already exists for user_id {user_id}")
@@ -337,6 +339,18 @@ class SupabaseMentorshipClient:
 
             # Get member_id (UUID) for linking
             member_id = member.get('id')
+            
+            # Check if mentor already exists by member_id to prevent duplicates
+            existing_by_member = self._circuit_breaker.call(
+                lambda: self._client.table('mentors')
+                .select('*')
+                .eq('member_id', member_id)
+                .execute()
+            )
+            
+            if existing_by_member.data and len(existing_by_member.data) > 0:
+                logger.info(f"Mentor profile already exists for member_id {member_id}")
+                return existing_by_member.data[0]
 
             # Prepare mentor profile data
             expertise = []
@@ -380,6 +394,12 @@ class SupabaseMentorshipClient:
             return created_mentor
 
         except Exception as e:
+            # Check if it's a duplicate key error
+            error_str = str(e).lower()
+            if 'duplicate' in error_str or '23505' in error_str:
+                logger.warning(f"Mentor profile already exists for {member_email}, fetching existing profile")
+                # Try to fetch the existing mentor
+                return self.get_mentor_by_user_id(user_id)
             logger.error(f"Error syncing mentor from member {member_email}: {e}")
             raise
     
@@ -394,15 +414,14 @@ class SupabaseMentorshipClient:
                 lambda: self._client.table('mentors')
                 .select('*, member:member_id(*)')
                 .eq('user_id', user_id)
-                .single()
                 .execute()
             )
             
-            if not response.data:
+            if not response.data or len(response.data) == 0:
                 logger.info(f"No mentor profile found for user_id {user_id}")
                 return None
             
-            mentor = response.data
+            mentor = response.data[0]
             
             # Enrich with member data
             member_data = mentor.pop('member', {}) if mentor.get('member') else {}
@@ -621,6 +640,23 @@ class SupabaseMentorshipClient:
         except Exception as e:
             logger.error(f"Error fetching bookings for mentor {mentor_id}: {e}")
             return []
+    
+    def get_booking(self, booking_id: str) -> Optional[Dict]:
+        """Get a single booking by ID"""
+        try:
+            response = self._circuit_breaker.call(
+                lambda: self._client.table('mentorship_bookings')
+                .select('*')
+                .eq('id', booking_id)
+                .execute()
+            )
+            
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            return None
+        except Exception as e:
+            logger.error(f"Error fetching booking {booking_id}: {e}")
+            return None
     
     # ========== STORAGE OPERATIONS ==========
     
