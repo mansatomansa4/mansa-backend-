@@ -82,41 +82,43 @@ def email_login(request):
     """
     Passwordless login using email only.
     Checks if email exists in members table, auto-creates user if needed, and returns JWT token.
+    Also auto-creates mentor profile in Supabase for mentor users.
     """
     from apps.platform.models import Member
-    
+    from apps.mentorship.supabase_client import supabase_client
+
     email = request.data.get('email', '').strip().lower()
-    
+
     if not email:
         return Response(
-            {"error": "Email is required"}, 
+            {"error": "Email is required"},
             status=status.HTTP_400_BAD_REQUEST
         )
-    
+
     try:
         # First, try to get existing user
         user = User.objects.get(email=email)
-        
+
     except User.DoesNotExist:
         # User doesn't exist in users_user table, check members table
         try:
             member = Member.objects.get(email__iexact=email)
             logger.info(f"Member found in members table: {email}. Auto-creating user account.")
-            
+
             # Parse member name into first_name and last_name
             name_parts = member.name.strip().split(maxsplit=1)
             first_name = name_parts[0] if len(name_parts) > 0 else ""
             last_name = name_parts[1] if len(name_parts) > 1 else ""
-            
+
             # Determine mentor/mentee status from membershiptype
             membershiptype = (member.membershiptype or "").lower()
             is_mentor = 'mentor' in membershiptype
             is_mentee = 'mentee' in membershiptype or membershiptype == 'student'
-            
+
             # If neither, default to mentee
             if not is_mentor and not is_mentee:
                 is_mentee = True
-            
+
             # Set role based on membershiptype
             if is_mentor and is_mentee:
                 role = 'mentor_mentee'
@@ -124,7 +126,7 @@ def email_login(request):
                 role = 'mentor'
             else:
                 role = 'mentee'
-            
+
             # Auto-create user from member data
             user = User.objects.create_user(
                 email=email,
@@ -136,7 +138,7 @@ def email_login(request):
                 approval_status='approved',  # Auto-approve members
             )
             logger.info(f"Auto-created user account for member: {email} (role: {role})")
-            
+
         except Member.DoesNotExist:
             # Email not found in either table
             logger.warning(f"Login attempt with unregistered email: {email}")
@@ -147,14 +149,34 @@ def email_login(request):
                 },
                 status=status.HTTP_404_NOT_FOUND
             )
-    
+
+    # Auto-create mentor profile in Supabase if user is a mentor
+    mentor_profile = None
+    if user.is_mentor:
+        try:
+            # Check if mentor profile already exists
+            existing_mentor = supabase_client.get_mentor_by_user_id(user.id)
+            if not existing_mentor:
+                # Try to sync/create mentor profile from member data
+                mentor_profile = supabase_client.sync_mentor_from_member(email, user.id)
+                if mentor_profile:
+                    logger.info(f"Auto-created mentor profile in Supabase for user: {email}")
+                else:
+                    logger.warning(f"Could not auto-create mentor profile for user: {email}")
+            else:
+                mentor_profile = existing_mentor
+                logger.info(f"Mentor profile already exists for user: {email}")
+        except Exception as e:
+            logger.error(f"Error auto-creating mentor profile for {email}: {e}")
+            # Don't fail login if mentor profile creation fails
+
     # Generate JWT tokens
     refresh = RefreshToken.for_user(user)
     access_token = str(refresh.access_token)
     refresh_token = str(refresh)
-    
+
     # Return user info with tokens
-    return Response({
+    response_data = {
         "access": access_token,
         "refresh": refresh_token,
         "user": {
@@ -167,4 +189,10 @@ def email_login(request):
             "is_mentee": user.is_mentee,
             "approval_status": user.approval_status,
         }
-    })
+    }
+
+    # Include mentor_id if available
+    if mentor_profile:
+        response_data["user"]["mentor_id"] = mentor_profile.get("id")
+
+    return Response(response_data)

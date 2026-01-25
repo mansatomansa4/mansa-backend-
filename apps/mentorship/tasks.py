@@ -406,7 +406,7 @@ We'd love to hear your feedback! Please take a moment to rate your session and l
 Best regards,
 Mansa Mentorship Team
             """
-            
+
             send_mail(
                 subject=f"Session Completed - Thank You! - {session_date}",
                 message=mentee_message,
@@ -414,10 +414,209 @@ Mansa Mentorship Team
                 recipient_list=[mentee.email],
                 fail_silently=False,
             )
-            
+
             logger.info(f"Completion email sent to mentee {mentee.email} for booking {booking_id}")
             return True
-        
+
+        # Handle rejected status - notify mentee
+        elif new_status == 'rejected':
+            mentee_message = f"""
+Hello {mentee.first_name},
+
+Unfortunately, your mentorship session request has been declined by {mentor_user.first_name}.
+
+Declined Session Details:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📅 Date: {session_date}
+⏰ Time: {time_display}
+👨‍🏫 Mentor: {mentor_user.first_name} {mentor_user.last_name}
+📝 Topic: {booking['topic']}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{f"Reason: {booking.get('rejection_reason')}" if booking.get('rejection_reason') else ""}
+
+Don't be discouraged! You can browse other available mentors and book a new session from your Mansa dashboard.
+
+Best regards,
+Mansa Mentorship Team
+            """
+
+            send_mail(
+                subject=f"Session Request Declined - {session_date}",
+                message=mentee_message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[mentee.email],
+                fail_silently=False,
+            )
+
+            logger.info(f"Rejection email sent to mentee {mentee.email} for booking {booking_id}")
+            return True
+
+        # Handle cancelled status (generic)
+        elif new_status == 'cancelled':
+            cancelled_by = booking.get('cancelled_by', 'unknown')
+
+            if cancelled_by == 'mentor':
+                # Notify mentee
+                mentee_message = f"""
+Hello {mentee.first_name},
+
+Your mentorship session has been cancelled by the mentor.
+
+Cancelled Session Details:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📅 Date: {session_date}
+⏰ Time: {time_display}
+👨‍🏫 Mentor: {mentor_user.first_name} {mentor_user.last_name}
+📝 Topic: {booking['topic']}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{f"Reason: {booking.get('cancellation_reason')}" if booking.get('cancellation_reason') else ""}
+
+We apologize for the inconvenience. You can browse other available mentors from your Mansa dashboard.
+
+Best regards,
+Mansa Mentorship Team
+                """
+
+                send_mail(
+                    subject=f"Session Cancelled - {session_date}",
+                    message=mentee_message,
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=[mentee.email],
+                    fail_silently=False,
+                )
+            else:
+                # Notify mentor
+                mentor_message = f"""
+Hello {mentor_user.first_name},
+
+A mentorship session has been cancelled by the mentee.
+
+Cancelled Session Details:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📅 Date: {session_date}
+⏰ Time: {time_display}
+👤 Mentee: {mentee.first_name} {mentee.last_name}
+📝 Topic: {booking['topic']}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{f"Reason: {booking.get('cancellation_reason')}" if booking.get('cancellation_reason') else ""}
+
+Your time slot is now available for other bookings.
+
+Best regards,
+Mansa Mentorship Team
+                """
+
+                send_mail(
+                    subject=f"Session Cancelled by Mentee - {session_date}",
+                    message=mentor_message,
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=[mentor_user.email],
+                    fail_silently=False,
+                )
+
+            logger.info(f"Cancellation email sent for booking {booking_id}")
+            return True
+
+        # Handle rescheduled status - notify both
+        elif new_status == 'rescheduled':
+            # Notify mentee
+            mentee_message = f"""
+Hello {mentee.first_name},
+
+Your mentorship session has been rescheduled.
+
+New Session Details:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📅 New Date: {session_date}
+⏰ New Time: {time_display}
+👨‍🏫 Mentor: {mentor_user.first_name} {mentor_user.last_name}
+📝 Topic: {booking['topic']}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Please update your calendar with the new date and time.
+
+Best regards,
+Mansa Mentorship Team
+            """
+
+            send_mail(
+                subject=f"Session Rescheduled - {session_date}",
+                message=mentee_message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[mentee.email],
+                fail_silently=False,
+            )
+
+            # Notify mentor
+            mentor_message = f"""
+Hello {mentor_user.first_name},
+
+A mentorship session has been rescheduled.
+
+New Session Details:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📅 New Date: {session_date}
+⏰ New Time: {time_display}
+👤 Mentee: {mentee.first_name} {mentee.last_name}
+📝 Topic: {booking['topic']}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Please update your calendar with the new date and time.
+
+Best regards,
+Mansa Mentorship Team
+            """
+
+            send_mail(
+                subject=f"Session Rescheduled - {session_date}",
+                message=mentor_message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[mentor_user.email],
+                fail_silently=False,
+            )
+
+            logger.info(f"Reschedule email sent for booking {booking_id}")
+            return True
+
+        # Handle no_show status
+        elif new_status == 'no_show':
+            no_show_by = booking.get('no_show_by', 'unknown')
+
+            if no_show_by == 'mentee':
+                # Notify mentee
+                mentee_message = f"""
+Hello {mentee.first_name},
+
+You have been marked as a no-show for your scheduled mentorship session.
+
+Session Details:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📅 Date: {session_date}
+⏰ Time: {time_display}
+👨‍🏫 Mentor: {mentor_user.first_name} {mentor_user.last_name}
+📝 Topic: {booking['topic']}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+If this was a mistake, please contact the mentor or reach out to support.
+
+Best regards,
+Mansa Mentorship Team
+                """
+
+                send_mail(
+                    subject=f"Missed Session - {session_date}",
+                    message=mentee_message,
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=[mentee.email],
+                    fail_silently=False,
+                )
+
+            logger.info(f"No-show email sent for booking {booking_id}")
+            return True
+
         logger.info(f"Status update email sent for booking {booking_id}: {old_status} -> {new_status}")
         return True
         

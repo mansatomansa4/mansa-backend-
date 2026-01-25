@@ -302,7 +302,7 @@ class SupabaseMentorshipClient:
     def sync_mentor_from_member(self, member_email: str, user_id: int) -> Optional[Dict]:
         """
         Create or update mentor profile based on member data.
-        Used for automatic sync when membershiptype is 'mentor'.
+        Used for automatic sync when membershiptype contains 'mentor'.
         """
         try:
             # Check if mentor already exists
@@ -310,35 +310,48 @@ class SupabaseMentorshipClient:
             if existing_mentor:
                 logger.info(f"Mentor profile already exists for user_id {user_id}")
                 return existing_mentor
-            
-            # Get member data
+
+            # Get member data - use ilike for case-insensitive match on membershiptype
             member_response = self._circuit_breaker.call(
                 lambda: self._client.table('members')
                 .select('*')
-                .eq('email', member_email)
-                .eq('membershiptype', 'mentor')
-                .single()
+                .ilike('email', member_email)
                 .execute()
             )
-            
+
             if not member_response.data:
-                logger.warning(f"No member found with email {member_email} and membershiptype='mentor'")
+                logger.warning(f"No member found with email {member_email}")
                 return None
-            
-            member = member_response.data
-            
+
+            # Find the member with mentor in membershiptype (case-insensitive)
+            member = None
+            for m in member_response.data:
+                membershiptype = (m.get('membershiptype') or '').lower()
+                if 'mentor' in membershiptype:
+                    member = m
+                    break
+
+            if not member:
+                logger.warning(f"Member {member_email} is not a mentor (membershiptype doesn't contain 'mentor')")
+                return None
+
+            # Get member_id (UUID) for linking
+            member_id = member.get('id')
+
             # Prepare mentor profile data
             expertise = []
-            if member.get('areaOfExpertise'):
-                expertise.append(member['areaOfExpertise'])
+            # Handle both camelCase and lowercase field names
+            area_of_expertise = member.get('areaOfExpertise') or member.get('areaofexpertise') or ''
+            if area_of_expertise:
+                expertise.append(area_of_expertise)
             if member.get('industry'):
                 expertise.append(member['industry'])
             if member.get('skills'):
                 skills_list = [s.strip() for s in member['skills'].split(',') if s.strip()]
                 expertise.extend(skills_list[:3])
-            
-            expertise = list(set(expertise))  # Remove duplicates
-            
+
+            expertise = list(set(filter(None, expertise)))  # Remove duplicates and empty strings
+
             # Create bio
             bio_parts = []
             if member.get('experience'):
@@ -347,22 +360,25 @@ class SupabaseMentorshipClient:
                 bio_parts.append(f"Occupation: {member['occupation']}")
             if member.get('jobtitle'):
                 bio_parts.append(f"Job Title: {member['jobtitle']}")
-            
+
             bio = " | ".join(bio_parts) if bio_parts else "Experienced mentor ready to help you grow."
-            
-            # Create mentor profile
+
+            # Create mentor profile with member_id link
             mentor_data = {
                 'user_id': user_id,
+                'member_id': member_id,  # Link to members table
                 'bio': bio,
-                'expertise': expertise,
+                'expertise': expertise if expertise else ['General Mentorship'],
                 'is_approved': True,  # Auto-approve mentors from members table
                 'rating': 0.00,
                 'total_sessions': 0,
                 'version': 1
             }
-            
-            return self.create_mentor_profile(mentor_data)
-            
+
+            created_mentor = self.create_mentor_profile(mentor_data)
+            logger.info(f"Created mentor profile for user_id {user_id} linked to member_id {member_id}")
+            return created_mentor
+
         except Exception as e:
             logger.error(f"Error syncing mentor from member {member_email}: {e}")
             raise
@@ -417,24 +433,113 @@ class SupabaseMentorshipClient:
     
     # ========== AVAILABILITY OPERATIONS ==========
 
-    
     def get_availability_slots(self, mentor_id: str, date_range: Dict = None) -> List[Dict]:
         """Get availability slots for a mentor"""
         try:
             query = self._client.table('mentor_availability').select('*').eq('mentor_id', mentor_id).eq('is_active', True)
-            
+
             if date_range:
                 # Filter by date range if provided
                 if 'start_date' in date_range:
                     query = query.gte('specific_date', date_range['start_date'])
                 if 'end_date' in date_range:
                     query = query.lte('specific_date', date_range['end_date'])
-            
+
             response = self._circuit_breaker.call(lambda: query.execute())
             return response.data
         except Exception as e:
             logger.error(f"Error fetching availability for mentor {mentor_id}: {e}")
             return []
+
+    def get_availability_slot(self, slot_id: str) -> Optional[Dict]:
+        """Get a single availability slot by ID"""
+        try:
+            response = self._circuit_breaker.call(
+                lambda: self._client.table('mentor_availability')
+                .select('*')
+                .eq('id', slot_id)
+                .single()
+                .execute()
+            )
+            return response.data if response.data else None
+        except Exception as e:
+            logger.error(f"Error fetching availability slot {slot_id}: {e}")
+            return None
+
+    def create_availability_slot(self, data: Dict) -> Optional[Dict]:
+        """Create a new availability slot"""
+        try:
+            # Ensure required fields
+            slot_data = {
+                'mentor_id': data['mentor_id'],
+                'start_time': data.get('start_time'),
+                'end_time': data.get('end_time'),
+                'is_recurring': data.get('is_recurring', False),
+                'is_active': data.get('is_active', True),
+            }
+
+            # Add day_of_week for recurring slots
+            if slot_data['is_recurring'] and 'day_of_week' in data:
+                slot_data['day_of_week'] = data['day_of_week']
+
+            # Add specific_date for non-recurring slots
+            if not slot_data['is_recurring'] and 'specific_date' in data:
+                slot_data['specific_date'] = data['specific_date']
+
+            response = self._circuit_breaker.call(
+                lambda: self._client.table('mentor_availability')
+                .insert(slot_data)
+                .execute()
+            )
+            return response.data[0] if response.data else None
+        except Exception as e:
+            logger.error(f"Error creating availability slot: {e}")
+            raise
+
+    def update_availability_slot(self, slot_id: str, data: Dict) -> Optional[Dict]:
+        """Update an availability slot"""
+        try:
+            # Build update data, only include provided fields
+            update_data = {}
+            if 'start_time' in data:
+                update_data['start_time'] = data['start_time']
+            if 'end_time' in data:
+                update_data['end_time'] = data['end_time']
+            if 'day_of_week' in data:
+                update_data['day_of_week'] = data['day_of_week']
+            if 'specific_date' in data:
+                update_data['specific_date'] = data['specific_date']
+            if 'is_active' in data:
+                update_data['is_active'] = data['is_active']
+            if 'is_recurring' in data:
+                update_data['is_recurring'] = data['is_recurring']
+
+            update_data['updated_at'] = datetime.utcnow().isoformat()
+
+            response = self._circuit_breaker.call(
+                lambda: self._client.table('mentor_availability')
+                .update(update_data)
+                .eq('id', slot_id)
+                .execute()
+            )
+            return response.data[0] if response.data else None
+        except Exception as e:
+            logger.error(f"Error updating availability slot {slot_id}: {e}")
+            raise
+
+    def delete_availability_slot(self, slot_id: str) -> bool:
+        """Delete an availability slot (soft delete by setting is_active=False)"""
+        try:
+            response = self._circuit_breaker.call(
+                lambda: self._client.table('mentor_availability')
+                .update({'is_active': False, 'updated_at': datetime.utcnow().isoformat()})
+                .eq('id', slot_id)
+                .execute()
+            )
+            return bool(response.data)
+        except Exception as e:
+            logger.error(f"Error deleting availability slot {slot_id}: {e}")
+            raise
     
     # ========== BOOKING OPERATIONS ==========
     
@@ -479,32 +584,38 @@ class SupabaseMentorshipClient:
             logger.error(f"Error updating booking {booking_id}: {e}")
             raise
     
-    def get_mentee_bookings(self, user_id: int, status_filter: str = None) -> List[Dict]:
+    def get_mentee_bookings(self, user_id: int, status_filter: str = None, limit: int = None) -> List[Dict]:
         """Get all bookings for a mentee"""
         try:
             query = self._client.table('mentorship_bookings').select('*').eq('mentee_id', user_id)
-            
+
             if status_filter:
                 query = query.eq('status', status_filter)
-            
+
             query = query.order('session_date', desc=True)
-            
+
+            if limit:
+                query = query.limit(limit)
+
             response = self._circuit_breaker.call(lambda: query.execute())
             return response.data
         except Exception as e:
             logger.error(f"Error fetching bookings for mentee {user_id}: {e}")
             return []
-    
-    def get_mentor_bookings(self, mentor_id: str, status_filter: str = None) -> List[Dict]:
+
+    def get_mentor_bookings(self, mentor_id: str, status_filter: str = None, limit: int = None) -> List[Dict]:
         """Get all bookings for a mentor"""
         try:
             query = self._client.table('mentorship_bookings').select('*').eq('mentor_id', mentor_id)
-            
+
             if status_filter:
                 query = query.eq('status', status_filter)
-            
+
             query = query.order('session_date', desc=True)
-            
+
+            if limit:
+                query = query.limit(limit)
+
             response = self._circuit_breaker.call(lambda: query.execute())
             return response.data
         except Exception as e:
@@ -564,21 +675,700 @@ class SupabaseMentorshipClient:
             # URL format: https://{project}.supabase.co/storage/v1/object/public/{bucket}/{path}
             if f'/object/public/{bucket_name}/' in photo_url:
                 file_path = photo_url.split(f'/object/public/{bucket_name}/')[1]
-                
+
                 # Delete file
                 self._circuit_breaker.call(
                     lambda: self._client.storage.from_(bucket_name).remove([file_path])
                 )
-                
+
                 logger.info(f"Deleted photo: {file_path}")
                 return True
             else:
                 logger.warning(f"Invalid photo URL format: {photo_url}")
                 return False
-                
+
         except Exception as e:
             logger.error(f"Error deleting photo {photo_url}: {e}")
             return False
+
+    # ========== REVIEW OPERATIONS ==========
+
+    def get_mentor_reviews(self, mentor_id: str, limit: int = 10, page: int = 1, page_size: int = 10) -> List[Dict]:
+        """Get reviews for a mentor with pagination"""
+        try:
+            start = (page - 1) * page_size
+            end = start + page_size - 1
+
+            response = self._circuit_breaker.call(
+                lambda: self._client.table('mentorship_reviews')
+                .select('*, mentee:mentee_id(id, email, first_name, last_name)')
+                .eq('mentor_id', mentor_id)
+                .order('created_at', desc=True)
+                .range(start, end)
+                .execute()
+            )
+            return response.data if response.data else []
+        except Exception as e:
+            logger.error(f"Error fetching reviews for mentor {mentor_id}: {e}")
+            return []
+
+    def get_mentor_review_count(self, mentor_id: str) -> int:
+        """Get total review count for a mentor"""
+        try:
+            response = self._circuit_breaker.call(
+                lambda: self._client.table('mentorship_reviews')
+                .select('id', count='exact')
+                .eq('mentor_id', mentor_id)
+                .execute()
+            )
+            return response.count or 0
+        except Exception as e:
+            logger.error(f"Error counting reviews for mentor {mentor_id}: {e}")
+            return 0
+
+    def create_review(self, data: Dict) -> Optional[Dict]:
+        """Create a new review for a mentor"""
+        try:
+            review_data = {
+                'mentor_id': data['mentor_id'],
+                'mentee_id': data['mentee_id'],
+                'booking_id': data.get('booking_id'),
+                'rating': data['rating'],
+                'comment': data.get('comment', ''),
+                'created_at': datetime.utcnow().isoformat()
+            }
+
+            response = self._circuit_breaker.call(
+                lambda: self._client.table('mentorship_reviews')
+                .insert(review_data)
+                .execute()
+            )
+            return response.data[0] if response.data else None
+        except Exception as e:
+            logger.error(f"Error creating review: {e}")
+            raise
+
+    def update_mentor_rating(self, mentor_id: str) -> Optional[float]:
+        """Recalculate and update mentor's average rating"""
+        try:
+            # Get all reviews for the mentor
+            reviews_response = self._circuit_breaker.call(
+                lambda: self._client.table('mentorship_reviews')
+                .select('rating')
+                .eq('mentor_id', mentor_id)
+                .execute()
+            )
+
+            if not reviews_response.data:
+                return None
+
+            # Calculate average
+            ratings = [r['rating'] for r in reviews_response.data]
+            avg_rating = round(sum(ratings) / len(ratings), 2)
+
+            # Update mentor profile
+            self._circuit_breaker.call(
+                lambda: self._client.table('mentors')
+                .update({'rating': avg_rating, 'updated_at': datetime.utcnow().isoformat()})
+                .eq('id', mentor_id)
+                .execute()
+            )
+
+            logger.info(f"Updated mentor {mentor_id} rating to {avg_rating}")
+            return avg_rating
+        except Exception as e:
+            logger.error(f"Error updating mentor rating for {mentor_id}: {e}")
+            return None
+
+    def increment_mentor_sessions(self, mentor_id: str) -> bool:
+        """Increment mentor's total session count"""
+        try:
+            # Get current count
+            mentor_response = self._circuit_breaker.call(
+                lambda: self._client.table('mentors')
+                .select('total_sessions')
+                .eq('id', mentor_id)
+                .single()
+                .execute()
+            )
+
+            current_sessions = mentor_response.data.get('total_sessions', 0) if mentor_response.data else 0
+
+            # Update count
+            self._circuit_breaker.call(
+                lambda: self._client.table('mentors')
+                .update({
+                    'total_sessions': current_sessions + 1,
+                    'updated_at': datetime.utcnow().isoformat()
+                })
+                .eq('id', mentor_id)
+                .execute()
+            )
+
+            logger.info(f"Incremented sessions for mentor {mentor_id} to {current_sessions + 1}")
+            return True
+        except Exception as e:
+            logger.error(f"Error incrementing sessions for mentor {mentor_id}: {e}")
+            return False
+
+    # ========== SEARCH OPERATIONS ==========
+
+    def search_mentors(self, filters: Dict = None, pagination: Dict = None) -> Dict:
+        """
+        Search mentors with full-text search and filters.
+        Returns: {'data': [...], 'count': total_count}
+        """
+        try:
+            # Start with approved mentors, join with member data
+            query = (
+                self._client.table('mentors')
+                .select('*, member:member_id(*)', count='exact')
+                .eq('is_approved', True)
+            )
+
+            if filters:
+                # Search query (searches bio, expertise)
+                if filters.get('query'):
+                    search_term = filters['query']
+                    # Use ilike for case-insensitive search on bio
+                    query = query.ilike('bio', f'%{search_term}%')
+
+                # Filter by expertise
+                if filters.get('expertise'):
+                    query = query.contains('expertise', [filters['expertise']])
+
+                # Filter by minimum rating
+                if filters.get('min_rating'):
+                    query = query.gte('rating', filters['min_rating'])
+
+                # Filter by availability (has any active availability slots)
+                # This would require a subquery or RPC function in Supabase
+
+            # Apply pagination
+            if pagination:
+                page = pagination.get('page', 1)
+                page_size = pagination.get('page_size', 12)
+                start = (page - 1) * page_size
+                end = start + page_size - 1
+                query = query.range(start, end)
+
+            # Order by rating descending
+            query = query.order('rating', desc=True)
+
+            response = self._circuit_breaker.call(lambda: query.execute())
+
+            # Enrich with member data
+            enriched_data = []
+            for mentor in response.data:
+                member_data = mentor.pop('member', {}) if mentor.get('member') else {}
+
+                enriched_mentor = {
+                    **mentor,
+                    'name': member_data.get('name', ''),
+                    'email': member_data.get('email', ''),
+                    'phone': member_data.get('phone', ''),
+                    'country': member_data.get('country', ''),
+                    'city': member_data.get('city', ''),
+                    'linkedin': member_data.get('linkedin', ''),
+                    'experience': member_data.get('experience', ''),
+                    'areaofexpertise': member_data.get('areaofexpertise', ''),
+                    'occupation': member_data.get('occupation', ''),
+                    'jobtitle': member_data.get('jobtitle', ''),
+                    'skills': member_data.get('skills', ''),
+                }
+                enriched_data.append(enriched_mentor)
+
+            return {
+                'data': enriched_data,
+                'count': response.count
+            }
+        except Exception as e:
+            logger.error(f"Error searching mentors: {e}")
+            return {'data': [], 'count': 0}
+
+    def get_recommended_mentors(self, user_id: int, limit: int = 6) -> List[Dict]:
+        """
+        Get recommended mentors for a mentee.
+        Simple recommendation based on highest rated mentors.
+        """
+        try:
+            response = self._circuit_breaker.call(
+                lambda: self._client.table('mentors')
+                .select('*, member:member_id(*)')
+                .eq('is_approved', True)
+                .order('rating', desc=True)
+                .order('total_sessions', desc=True)
+                .limit(limit)
+                .execute()
+            )
+
+            if not response.data:
+                return []
+
+            # Enrich with member data
+            enriched_data = []
+            for mentor in response.data:
+                member_data = mentor.pop('member', {}) if mentor.get('member') else {}
+
+                enriched_mentor = {
+                    **mentor,
+                    'name': member_data.get('name', ''),
+                    'email': member_data.get('email', ''),
+                    'occupation': member_data.get('occupation', ''),
+                    'jobtitle': member_data.get('jobtitle', ''),
+                    'areaofexpertise': member_data.get('areaofexpertise', ''),
+                }
+                enriched_data.append(enriched_mentor)
+
+            return enriched_data
+        except Exception as e:
+            logger.error(f"Error getting recommended mentors for user {user_id}: {e}")
+            return []
+
+    # ========== ENHANCED BOOKING OPERATIONS ==========
+
+    def get_booking(self, booking_id: str) -> Optional[Dict]:
+        """Get a single booking by ID"""
+        try:
+            response = self._circuit_breaker.call(
+                lambda: self._client.table('mentorship_bookings')
+                .select('*')
+                .eq('id', booking_id)
+                .single()
+                .execute()
+            )
+            return response.data if response.data else None
+        except Exception as e:
+            logger.error(f"Error fetching booking {booking_id}: {e}")
+            return None
+
+    def create_booking(self, data: Dict) -> Optional[Dict]:
+        """Create a new booking"""
+        try:
+            booking_data = {
+                'mentor_id': data['mentor_id'],
+                'mentee_id': data['mentee_id'],
+                'session_date': data['session_date'],
+                'start_time': data['start_time'],
+                'end_time': data['end_time'],
+                'topic': data.get('topic', ''),
+                'message': data.get('message', ''),
+                'status': 'pending',
+                'booking_version': 1,
+                'created_at': datetime.utcnow().isoformat()
+            }
+
+            response = self._circuit_breaker.call(
+                lambda: self._client.table('mentorship_bookings')
+                .insert(booking_data)
+                .execute()
+            )
+            return response.data[0] if response.data else None
+        except Exception as e:
+            logger.error(f"Error creating booking: {e}")
+            raise
+
+    def update_booking(self, booking_id: str, data: Dict) -> Optional[Dict]:
+        """Update a booking"""
+        try:
+            # Build update data
+            update_data = {}
+            allowed_fields = [
+                'status', 'session_date', 'start_time', 'end_time',
+                'topic', 'message', 'meeting_link', 'mentor_notes',
+                'mentee_notes', 'cancellation_reason', 'completed_at'
+            ]
+
+            for field in allowed_fields:
+                if field in data:
+                    update_data[field] = data[field]
+
+            update_data['updated_at'] = datetime.utcnow().isoformat()
+
+            response = self._circuit_breaker.call(
+                lambda: self._client.table('mentorship_bookings')
+                .update(update_data)
+                .eq('id', booking_id)
+                .execute()
+            )
+            return response.data[0] if response.data else None
+        except Exception as e:
+            logger.error(f"Error updating booking {booking_id}: {e}")
+            raise
+
+    def reschedule_booking(self, booking_id: str, new_date: str, new_start: str, new_end: str) -> Optional[Dict]:
+        """Reschedule a booking to a new date/time"""
+        try:
+            update_data = {
+                'session_date': new_date,
+                'start_time': new_start,
+                'end_time': new_end,
+                'status': 'rescheduled',
+                'updated_at': datetime.utcnow().isoformat()
+            }
+
+            response = self._circuit_breaker.call(
+                lambda: self._client.table('mentorship_bookings')
+                .update(update_data)
+                .eq('id', booking_id)
+                .execute()
+            )
+            return response.data[0] if response.data else None
+        except Exception as e:
+            logger.error(f"Error rescheduling booking {booking_id}: {e}")
+            raise
+
+    def check_booking_conflicts(
+        self,
+        mentor_id: str,
+        session_date: str,
+        start_time: str,
+        end_time: str,
+        exclude_booking_id: str = None
+    ) -> bool:
+        """
+        Check if there are any conflicting bookings for the given time slot.
+        Returns True if there's a conflict.
+        """
+        try:
+            # Get bookings for the mentor on the same date
+            query = (
+                self._client.table('mentorship_bookings')
+                .select('id, start_time, end_time')
+                .eq('mentor_id', mentor_id)
+                .eq('session_date', session_date)
+                .in_('status', ['pending', 'confirmed'])
+            )
+
+            if exclude_booking_id:
+                query = query.neq('id', exclude_booking_id)
+
+            response = self._circuit_breaker.call(lambda: query.execute())
+
+            if not response.data:
+                return False
+
+            # Check for time overlap
+            for booking in response.data:
+                existing_start = booking['start_time']
+                existing_end = booking['end_time']
+
+                # Check if times overlap
+                # New slot starts before existing ends AND new slot ends after existing starts
+                if start_time < existing_end and end_time > existing_start:
+                    logger.warning(f"Booking conflict detected for mentor {mentor_id} on {session_date}")
+                    return True
+
+            return False
+        except Exception as e:
+            logger.error(f"Error checking booking conflicts: {e}")
+            # In case of error, assume conflict to be safe
+            return True
+
+    def enrich_booking(self, booking: Dict) -> Dict:
+        """Enrich a single booking with mentor and mentee details"""
+        try:
+            enriched = {**booking}
+
+            # Get mentor details
+            if booking.get('mentor_id'):
+                mentor_response = self._circuit_breaker.call(
+                    lambda: self._client.table('mentors')
+                    .select('*, member:member_id(name, email, jobtitle, occupation)')
+                    .eq('id', booking['mentor_id'])
+                    .single()
+                    .execute()
+                )
+                if mentor_response.data:
+                    mentor = mentor_response.data
+                    member_data = mentor.pop('member', {}) if mentor.get('member') else {}
+                    enriched['mentor'] = {
+                        'id': mentor.get('id'),
+                        'user_id': mentor.get('user_id'),
+                        'name': member_data.get('name', ''),
+                        'email': member_data.get('email', ''),
+                        'job_title': member_data.get('jobtitle', ''),
+                        'occupation': member_data.get('occupation', ''),
+                        'photo_url': mentor.get('photo_url'),
+                        'rating': mentor.get('rating'),
+                    }
+
+            # Get mentee details from Django user
+            # Note: This requires the mentee_id to be a Django user ID
+            # The view layer should handle this enrichment if needed
+
+            return enriched
+        except Exception as e:
+            logger.error(f"Error enriching booking: {e}")
+            return booking
+
+    def enrich_bookings(self, bookings: List[Dict], role: str = None) -> List[Dict]:
+        """Enrich multiple bookings with mentor and mentee details"""
+        try:
+            if not bookings:
+                return []
+
+            # Collect unique mentor IDs
+            mentor_ids = list(set(b.get('mentor_id') for b in bookings if b.get('mentor_id')))
+
+            # Batch fetch mentor data
+            mentors_map = {}
+            if mentor_ids:
+                mentors_response = self._circuit_breaker.call(
+                    lambda: self._client.table('mentors')
+                    .select('*, member:member_id(name, email, jobtitle, occupation)')
+                    .in_('id', mentor_ids)
+                    .execute()
+                )
+
+                for mentor in (mentors_response.data or []):
+                    member_data = mentor.pop('member', {}) if mentor.get('member') else {}
+                    mentors_map[mentor['id']] = {
+                        'id': mentor.get('id'),
+                        'user_id': mentor.get('user_id'),
+                        'name': member_data.get('name', ''),
+                        'email': member_data.get('email', ''),
+                        'job_title': member_data.get('jobtitle', ''),
+                        'occupation': member_data.get('occupation', ''),
+                        'photo_url': mentor.get('photo_url'),
+                        'rating': mentor.get('rating'),
+                    }
+
+            # Enrich each booking
+            enriched_bookings = []
+            for booking in bookings:
+                enriched = {**booking}
+                if booking.get('mentor_id') and booking['mentor_id'] in mentors_map:
+                    enriched['mentor'] = mentors_map[booking['mentor_id']]
+                enriched_bookings.append(enriched)
+
+            return enriched_bookings
+        except Exception as e:
+            logger.error(f"Error enriching bookings: {e}")
+            return bookings
+
+    # ========== ENHANCED AVAILABILITY OPERATIONS ==========
+
+    def clear_availability_slots(self, mentor_id: str, slot_type: str = None) -> int:
+        """
+        Clear all availability slots for a mentor.
+        slot_type can be 'recurring', 'specific', or None for all.
+        Returns the count of cleared slots.
+        """
+        try:
+            # First count the slots to be cleared
+            count_query = self._client.table('mentor_availability').select('id', count='exact').eq('mentor_id', mentor_id).eq('is_active', True)
+
+            if slot_type == 'recurring':
+                count_query = count_query.eq('is_recurring', True)
+            elif slot_type == 'specific':
+                count_query = count_query.eq('is_recurring', False)
+
+            count_response = self._circuit_breaker.call(lambda: count_query.execute())
+            count = count_response.count or 0
+
+            if count == 0:
+                return 0
+
+            # Now clear them
+            update_query = self._client.table('mentor_availability').update({
+                'is_active': False,
+                'updated_at': datetime.utcnow().isoformat()
+            }).eq('mentor_id', mentor_id).eq('is_active', True)
+
+            if slot_type == 'recurring':
+                update_query = update_query.eq('is_recurring', True)
+            elif slot_type == 'specific':
+                update_query = update_query.eq('is_recurring', False)
+
+            self._circuit_breaker.call(lambda: update_query.execute())
+
+            logger.info(f"Cleared {count} availability slots for mentor {mentor_id} (type: {slot_type or 'all'})")
+            return count
+        except Exception as e:
+            logger.error(f"Error clearing availability for mentor {mentor_id}: {e}")
+            return 0
+
+    def bulk_create_availability_slots(self, slots: List[Dict]) -> List[Dict]:
+        """Create multiple availability slots at once"""
+        try:
+            if not slots:
+                return []
+
+            # Prepare slot data
+            prepared_slots = []
+            for slot in slots:
+                slot_data = {
+                    'mentor_id': slot['mentor_id'],
+                    'start_time': slot.get('start_time'),
+                    'end_time': slot.get('end_time'),
+                    'is_recurring': slot.get('is_recurring', False),
+                    'is_active': slot.get('is_active', True),
+                    'created_at': datetime.utcnow().isoformat()
+                }
+
+                if slot_data['is_recurring'] and 'day_of_week' in slot:
+                    slot_data['day_of_week'] = slot['day_of_week']
+
+                if not slot_data['is_recurring'] and 'specific_date' in slot:
+                    slot_data['specific_date'] = slot['specific_date']
+
+                prepared_slots.append(slot_data)
+
+            response = self._circuit_breaker.call(
+                lambda: self._client.table('mentor_availability')
+                .insert(prepared_slots)
+                .execute()
+            )
+
+            logger.info(f"Created {len(response.data or [])} availability slots")
+            return response.data if response.data else []
+        except Exception as e:
+            logger.error(f"Error bulk creating availability slots: {e}")
+            raise
+
+    # ========== EXPERTISE OPERATIONS ==========
+
+    def get_expertise_categories(self) -> List[Dict]:
+        """Get all expertise categories"""
+        try:
+            response = self._circuit_breaker.call(
+                lambda: self._client.table('mentorship_expertise')
+                .select('*')
+                .order('name')
+                .execute()
+            )
+            return response.data if response.data else []
+        except Exception as e:
+            logger.error(f"Error fetching expertise categories: {e}")
+            return []
+
+    # ========== DASHBOARD STATISTICS ==========
+
+    def get_mentor_stats(self, mentor_id: str) -> Dict:
+        """Get comprehensive statistics for a mentor"""
+        try:
+            # Get bookings stats
+            bookings_response = self._circuit_breaker.call(
+                lambda: self._client.table('mentorship_bookings')
+                .select('status', count='exact')
+                .eq('mentor_id', mentor_id)
+                .execute()
+            )
+
+            total_bookings = bookings_response.count or 0
+
+            # Count by status
+            status_counts = {}
+            for booking in (bookings_response.data or []):
+                status = booking.get('status', 'unknown')
+                status_counts[status] = status_counts.get(status, 0) + 1
+
+            # Get review stats
+            reviews_response = self._circuit_breaker.call(
+                lambda: self._client.table('mentorship_reviews')
+                .select('rating', count='exact')
+                .eq('mentor_id', mentor_id)
+                .execute()
+            )
+
+            total_reviews = reviews_response.count or 0
+            avg_rating = 0
+            if reviews_response.data:
+                ratings = [r['rating'] for r in reviews_response.data]
+                avg_rating = round(sum(ratings) / len(ratings), 2)
+
+            # Get upcoming sessions count
+            today = datetime.utcnow().date().isoformat()
+            upcoming_response = self._circuit_breaker.call(
+                lambda: self._client.table('mentorship_bookings')
+                .select('id', count='exact')
+                .eq('mentor_id', mentor_id)
+                .in_('status', ['pending', 'confirmed'])
+                .gte('session_date', today)
+                .execute()
+            )
+
+            return {
+                'total_bookings': total_bookings,
+                'completed_sessions': status_counts.get('completed', 0),
+                'pending_sessions': status_counts.get('pending', 0),
+                'confirmed_sessions': status_counts.get('confirmed', 0),
+                'cancelled_sessions': status_counts.get('cancelled', 0),
+                'upcoming_sessions': upcoming_response.count or 0,
+                'total_reviews': total_reviews,
+                'average_rating': avg_rating,
+                'status_breakdown': status_counts
+            }
+        except Exception as e:
+            logger.error(f"Error getting stats for mentor {mentor_id}: {e}")
+            return {
+                'total_bookings': 0,
+                'completed_sessions': 0,
+                'pending_sessions': 0,
+                'confirmed_sessions': 0,
+                'cancelled_sessions': 0,
+                'upcoming_sessions': 0,
+                'total_reviews': 0,
+                'average_rating': 0,
+                'status_breakdown': {}
+            }
+
+    def get_mentee_stats(self, mentee_id: int) -> Dict:
+        """Get comprehensive statistics for a mentee"""
+        try:
+            # Get bookings stats
+            bookings_response = self._circuit_breaker.call(
+                lambda: self._client.table('mentorship_bookings')
+                .select('status, mentor_id', count='exact')
+                .eq('mentee_id', mentee_id)
+                .execute()
+            )
+
+            total_bookings = bookings_response.count or 0
+
+            # Count by status
+            status_counts = {}
+            unique_mentors = set()
+            for booking in (bookings_response.data or []):
+                status = booking.get('status', 'unknown')
+                status_counts[status] = status_counts.get(status, 0) + 1
+                if booking.get('mentor_id'):
+                    unique_mentors.add(booking['mentor_id'])
+
+            # Get upcoming sessions
+            today = datetime.utcnow().date().isoformat()
+            upcoming_response = self._circuit_breaker.call(
+                lambda: self._client.table('mentorship_bookings')
+                .select('id', count='exact')
+                .eq('mentee_id', mentee_id)
+                .in_('status', ['pending', 'confirmed'])
+                .gte('session_date', today)
+                .execute()
+            )
+
+            return {
+                'total_bookings': total_bookings,
+                'completed_sessions': status_counts.get('completed', 0),
+                'pending_sessions': status_counts.get('pending', 0),
+                'confirmed_sessions': status_counts.get('confirmed', 0),
+                'cancelled_sessions': status_counts.get('cancelled', 0),
+                'upcoming_sessions': upcoming_response.count or 0,
+                'unique_mentors_count': len(unique_mentors),
+                'status_breakdown': status_counts
+            }
+        except Exception as e:
+            logger.error(f"Error getting stats for mentee {mentee_id}: {e}")
+            return {
+                'total_bookings': 0,
+                'completed_sessions': 0,
+                'pending_sessions': 0,
+                'confirmed_sessions': 0,
+                'cancelled_sessions': 0,
+                'upcoming_sessions': 0,
+                'unique_mentors_count': 0,
+                'status_breakdown': {}
+            }
 
 
 # Singleton instance
