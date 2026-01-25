@@ -403,13 +403,14 @@ class SupabaseMentorshipClient:
             logger.error(f"Error syncing mentor from member {member_email}: {e}")
             raise
     
-    def get_mentor_by_user_id(self, user_id: int) -> Optional[Dict]:
+    def get_mentor_by_user_id(self, user_id: int, email: str = None) -> Optional[Dict]:
         """
-        Get mentor profile by user_id.
+        Get mentor profile by user_id or email.
+        If user_id lookup fails and email is provided, lookup through members table.
         Returns mentor data with member information or None if not found.
         """
         try:
-            # Query mentors table by user_id
+            # First try to query by user_id
             response = self._circuit_breaker.call(
                 lambda: self._client.table('mentors')
                 .select('*, member:member_id(*)')
@@ -417,11 +418,42 @@ class SupabaseMentorshipClient:
                 .execute()
             )
             
-            if not response.data or len(response.data) == 0:
+            # If found by user_id, return it
+            if response.data and len(response.data) > 0:
+                mentor = response.data[0]
+            # If not found by user_id and email is provided, try email lookup
+            elif email:
+                logger.info(f"No mentor found by user_id {user_id}, trying email lookup: {email}")
+                # Get member by email first
+                member_response = self._circuit_breaker.call(
+                    lambda: self._client.table('members')
+                    .select('id')
+                    .eq('email', email)
+                    .execute()
+                )
+                
+                if not member_response.data or len(member_response.data) == 0:
+                    logger.info(f"No member found with email {email}")
+                    return None
+                
+                member_id = member_response.data[0]['id']
+                
+                # Now get mentor by member_id
+                mentor_response = self._circuit_breaker.call(
+                    lambda: self._client.table('mentors')
+                    .select('*, member:member_id(*)')
+                    .eq('member_id', member_id)
+                    .execute()
+                )
+                
+                if not mentor_response.data or len(mentor_response.data) == 0:
+                    logger.info(f"No mentor profile found for member_id {member_id}")
+                    return None
+                
+                mentor = mentor_response.data[0]
+            else:
                 logger.info(f"No mentor profile found for user_id {user_id}")
                 return None
-            
-            mentor = response.data[0]
             
             # Enrich with member data
             member_data = mentor.pop('member', {}) if mentor.get('member') else {}

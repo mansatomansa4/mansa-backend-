@@ -199,7 +199,7 @@ class MentorViewSet(viewsets.ViewSet):
         - Recent reviews
         """
         try:
-            mentor_data = supabase_client.get_mentor_by_user_id(request.user.id)
+            mentor_data = supabase_client.get_mentor_by_user_id(request.user.id, request.user.email)
             if not mentor_data:
                 return Response(
                     {'error': 'Mentor profile not found'},
@@ -328,7 +328,7 @@ class MentorViewSet(viewsets.ViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        existing = supabase_client.get_mentor_by_user_id(request.user.id)
+        existing = supabase_client.get_mentor_by_user_id(request.user.id, request.user.email)
         if existing:
             return Response(
                 {'error': 'Mentor profile already exists', 'mentor_id': existing['id']},
@@ -357,7 +357,7 @@ class MentorViewSet(viewsets.ViewSet):
     def update_my_profile(self, request):
         """Update current user's mentor profile"""
         try:
-            mentor_data = supabase_client.get_mentor_by_user_id(request.user.id)
+            mentor_data = supabase_client.get_mentor_by_user_id(request.user.id, request.user.email)
             if not mentor_data:
                 return Response(
                     {'error': 'Mentor profile not found'},
@@ -559,7 +559,7 @@ class MentorViewSet(viewsets.ViewSet):
     def stats(self, request):
         """Get statistics for current user's mentor profile"""
         try:
-            mentor_data = supabase_client.get_mentor_by_user_id(request.user.id)
+            mentor_data = supabase_client.get_mentor_by_user_id(request.user.id, request.user.email)
             if not mentor_data:
                 return Response(
                     {'error': 'Mentor profile not found'},
@@ -664,7 +664,7 @@ class BookingViewSet(viewsets.ViewSet):
 
         try:
             if role == 'mentor':
-                mentor_data = supabase_client.get_mentor_by_user_id(request.user.id)
+                mentor_data = supabase_client.get_mentor_by_user_id(request.user.id, request.user.email)
                 if not mentor_data:
                     return Response(
                         {'error': 'Mentor profile not found'},
@@ -708,7 +708,7 @@ class BookingViewSet(viewsets.ViewSet):
                 )
 
             # Verify user is part of this booking
-            mentor = supabase_client.get_mentor_by_user_id(request.user.id)
+            mentor = supabase_client.get_mentor_by_user_id(request.user.id, request.user.email)
             is_mentor = mentor and str(mentor['id']) == str(booking.get('mentor_id'))
             is_mentee = booking.get('mentee_id') == request.user.id
 
@@ -857,7 +857,7 @@ class BookingViewSet(viewsets.ViewSet):
                 return Response({'error': 'Booking not found'}, status=status.HTTP_404_NOT_FOUND)
 
             # Verify authorization
-            mentor = supabase_client.get_mentor_by_user_id(request.user.id)
+            mentor = supabase_client.get_mentor_by_user_id(request.user.id, request.user.email)
             is_mentor = mentor and str(mentor['id']) == str(booking.get('mentor_id'))
             is_mentee = booking.get('mentee_id') == request.user.id
 
@@ -908,7 +908,7 @@ class BookingViewSet(viewsets.ViewSet):
             if not booking:
                 return Response({'error': 'Booking not found'}, status=status.HTTP_404_NOT_FOUND)
 
-            mentor = supabase_client.get_mentor_by_user_id(request.user.id)
+            mentor = supabase_client.get_mentor_by_user_id(request.user.id, request.user.email)
             if not mentor or str(mentor['id']) != str(booking['mentor_id']):
                 return Response({'error': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -935,7 +935,7 @@ class BookingViewSet(viewsets.ViewSet):
             if not booking:
                 return Response({'error': 'Booking not found'}, status=status.HTTP_404_NOT_FOUND)
 
-            mentor = supabase_client.get_mentor_by_user_id(request.user.id)
+            mentor = supabase_client.get_mentor_by_user_id(request.user.id, request.user.email)
             if not mentor or str(mentor['id']) != str(booking['mentor_id']):
                 return Response({'error': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -1019,7 +1019,7 @@ class BookingViewSet(viewsets.ViewSet):
             if not booking:
                 return Response({'error': 'Booking not found'}, status=status.HTTP_404_NOT_FOUND)
 
-            mentor = supabase_client.get_mentor_by_user_id(request.user.id)
+            mentor = supabase_client.get_mentor_by_user_id(request.user.id, request.user.email)
             is_mentor = mentor and str(mentor['id']) == str(booking.get('mentor_id'))
             is_mentee = booking.get('mentee_id') == request.user.id
 
@@ -1079,7 +1079,7 @@ class AvailabilityViewSet(viewsets.ViewSet):
     def list(self, request):
         """List availability for current mentor"""
         try:
-            mentor_data = supabase_client.get_mentor_by_user_id(request.user.id)
+            mentor_data = supabase_client.get_mentor_by_user_id(request.user.id, request.user.email)
             if not mentor_data:
                 return Response(
                     {'error': 'Mentor profile not found'},
@@ -1110,7 +1110,7 @@ class AvailabilityViewSet(viewsets.ViewSet):
     def create(self, request):
         """Create a new availability slot"""
         try:
-            mentor_data = supabase_client.get_mentor_by_user_id(request.user.id)
+            mentor_data = supabase_client.get_mentor_by_user_id(request.user.id, request.user.email)
             if not mentor_data:
                 return Response(
                     {'error': 'Mentor profile not found'},
@@ -1134,7 +1134,7 @@ class AvailabilityViewSet(viewsets.ViewSet):
     def bulk(self, request):
         """Create multiple availability slots at once"""
         try:
-            mentor_data = supabase_client.get_mentor_by_user_id(request.user.id)
+            mentor_data = supabase_client.get_mentor_by_user_id(request.user.id, request.user.email)
             if not mentor_data:
                 return Response(
                     {'error': 'Mentor profile not found'},
@@ -1170,7 +1170,7 @@ class AvailabilityViewSet(viewsets.ViewSet):
     def partial_update(self, request, pk=None):
         """Update an availability slot"""
         try:
-            mentor_data = supabase_client.get_mentor_by_user_id(request.user.id)
+            mentor_data = supabase_client.get_mentor_by_user_id(request.user.id, request.user.email)
             if not mentor_data:
                 return Response(
                     {'error': 'Mentor profile not found'},
@@ -1196,7 +1196,7 @@ class AvailabilityViewSet(viewsets.ViewSet):
     def destroy(self, request, pk=None):
         """Delete an availability slot"""
         try:
-            mentor_data = supabase_client.get_mentor_by_user_id(request.user.id)
+            mentor_data = supabase_client.get_mentor_by_user_id(request.user.id, request.user.email)
             if not mentor_data:
                 return Response(
                     {'error': 'Mentor profile not found'},
@@ -1223,7 +1223,7 @@ class AvailabilityViewSet(viewsets.ViewSet):
     def clear(self, request):
         """Clear all availability slots for current mentor"""
         try:
-            mentor_data = supabase_client.get_mentor_by_user_id(request.user.id)
+            mentor_data = supabase_client.get_mentor_by_user_id(request.user.id, request.user.email)
             if not mentor_data:
                 return Response(
                     {'error': 'Mentor profile not found'},
