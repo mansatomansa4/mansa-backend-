@@ -29,6 +29,7 @@ from .serializers import (
 )
 from .supabase_client import supabase_client
 from .tasks import (
+    send_booking_confirmation_email,
     send_mentor_booking_notification,
     send_booking_status_update_email,
 )
@@ -679,7 +680,8 @@ class BookingViewSet(viewsets.ViewSet):
                 bookings = supabase_client.get_mentee_bookings(
                     request.user.id,
                     status_filter,
-                    limit=int(limit) if limit else None
+                    limit=int(limit) if limit else None,
+                    email=request.user.email
                 )
 
             # Enrich bookings with mentor/mentee info
@@ -710,7 +712,8 @@ class BookingViewSet(viewsets.ViewSet):
             # Verify user is part of this booking
             mentor = supabase_client.get_mentor_by_user_id(request.user.id, request.user.email)
             is_mentor = mentor and str(mentor['id']) == str(booking.get('mentor_id'))
-            is_mentee = booking.get('mentee_id') == request.user.id
+            mentee_member_id = supabase_client.get_member_id_by_email(request.user.email)
+            is_mentee = str(booking.get('mentee_id', '')) == str(mentee_member_id or '')
 
             if not is_mentor and not is_mentee:
                 return Response(
@@ -737,14 +740,22 @@ class BookingViewSet(viewsets.ViewSet):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         data = serializer.validated_data
-        data['mentee_id'] = request.user.id
         data['status'] = 'pending'
+
+        # Resolve mentee_id to member UUID from members table
+        member_id = supabase_client.get_member_id_by_email(request.user.email)
+        if not member_id:
+            return Response(
+                {'error': 'Your member profile was not found. Please contact admin.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        data['mentee_id'] = member_id
 
         # Add mentee info
         data['mentee_name'] = f"{request.user.first_name} {request.user.last_name}".strip()
         data['mentee_email'] = request.user.email
 
-        lock_key = f"{data['mentor_id']}_{data['session_date']}_{data['start_time']}"
+        lock_key = f"{data['mentor_id']}_{data['session_date']}_{data.get('start_time', '')}"
         lock_id = abs(hash(lock_key)) % (2**31)
 
         try:
@@ -774,6 +785,7 @@ class BookingViewSet(viewsets.ViewSet):
 
             if booking and booking.get('id'):
                 try:
+                    send_booking_confirmation_email.delay(str(booking['id']))
                     send_mentor_booking_notification.delay(str(booking['id']))
                 except Exception as e:
                     logger.error(f"Failed to send notification: {e}")
@@ -804,18 +816,33 @@ class BookingViewSet(viewsets.ViewSet):
         return self._update_booking_status(
             request, pk, 'rejected',
             mentor_only=True,
-            extra_data={'rejection_reason': reason}
+            extra_data={'cancellation_reason': reason}
         )
 
     @action(detail=True, methods=['patch'])
     def cancel(self, request, pk=None):
         """Cancel a booking (mentee or mentor)"""
         reason = request.data.get('reason', '')
-        cancelled_by = 'mentor' if self._is_mentor_for_booking(request.user.id, pk) else 'mentee'
+        is_mentor = self._is_mentor_for_booking(request.user.id, pk)
+        # cancelled_by is UUID in DB - resolve to member/mentor UUID
+        if is_mentor:
+            mentor = supabase_client.get_mentor_by_user_id(request.user.id, request.user.email)
+            cancelled_by_id = str(mentor['id']) if mentor else None
+            cancel_status = 'cancelled_by_mentor'
+        else:
+            member_id = supabase_client.get_member_id_by_email(request.user.email)
+            cancelled_by_id = str(member_id) if member_id else None
+            cancel_status = 'cancelled_by_mentee'
+        extra = {
+            'cancellation_reason': reason,
+            'cancelled_at': timezone.now().isoformat(),
+        }
+        if cancelled_by_id:
+            extra['cancelled_by'] = cancelled_by_id
         return self._update_booking_status(
-            request, pk, 'cancelled',
+            request, pk, cancel_status,
             mentor_only=False,
-            extra_data={'cancellation_reason': reason, 'cancelled_by': cancelled_by}
+            extra_data=extra
         )
 
     @action(detail=True, methods=['patch'])
@@ -825,7 +852,7 @@ class BookingViewSet(viewsets.ViewSet):
         return self._update_booking_status(
             request, pk, 'completed',
             mentor_only=True,
-            extra_data={'session_notes': notes, 'completed_at': timezone.now().isoformat()}
+            extra_data={'notes': notes}
         )
 
     @action(detail=True, methods=['patch'])
@@ -835,7 +862,7 @@ class BookingViewSet(viewsets.ViewSet):
         return self._update_booking_status(
             request, pk, 'no_show',
             mentor_only=True,
-            extra_data={'no_show_by': who}
+            extra_data={'notes': f'No-show by {who}'}
         )
 
     @action(detail=True, methods=['patch'])
@@ -859,7 +886,8 @@ class BookingViewSet(viewsets.ViewSet):
             # Verify authorization
             mentor = supabase_client.get_mentor_by_user_id(request.user.id, request.user.email)
             is_mentor = mentor and str(mentor['id']) == str(booking.get('mentor_id'))
-            is_mentee = booking.get('mentee_id') == request.user.id
+            mentee_member_id = supabase_client.get_member_id_by_email(request.user.email)
+            is_mentee = str(booking.get('mentee_id', '')) == str(mentee_member_id or '')
 
             if not is_mentor and not is_mentee:
                 return Response({'error': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
@@ -939,7 +967,7 @@ class BookingViewSet(viewsets.ViewSet):
             if not mentor or str(mentor['id']) != str(booking['mentor_id']):
                 return Response({'error': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
 
-            updated = supabase_client.update_booking(pk, {'session_notes': notes})
+            updated = supabase_client.update_booking(pk, {'notes': notes})
 
             return Response({
                 'message': 'Notes added successfully',
@@ -966,7 +994,9 @@ class BookingViewSet(viewsets.ViewSet):
             if not booking:
                 return Response({'error': 'Booking not found'}, status=status.HTTP_404_NOT_FOUND)
 
-            if booking.get('mentee_id') != request.user.id:
+            # Check mentee ownership by resolving user email to member UUID
+            mentee_member_id = supabase_client.get_member_id_by_email(request.user.email)
+            if str(booking.get('mentee_id', '')) != str(mentee_member_id or ''):
                 return Response(
                     {'error': 'Only the mentee can add feedback'},
                     status=status.HTTP_403_FORBIDDEN
@@ -986,17 +1016,17 @@ class BookingViewSet(viewsets.ViewSet):
 
             # Update booking with feedback
             supabase_client.update_booking(pk, {
-                'rating': rating,
-                'feedback': feedback,
-                'feedback_date': timezone.now().isoformat()
+                'rating': int(rating),
+                'mentor_feedback': feedback,
+                'feedback_requested': True,
             })
 
             # Create review record
             review = supabase_client.create_review({
                 'mentor_id': booking['mentor_id'],
-                'mentee_id': request.user.id,
+                'mentee_id': str(mentee_member_id),
                 'booking_id': pk,
-                'rating': rating,
+                'rating': int(rating),
                 'comment': feedback,
                 'mentee_name': f"{request.user.first_name} {request.user.last_name}".strip()
             })
@@ -1021,7 +1051,8 @@ class BookingViewSet(viewsets.ViewSet):
 
             mentor = supabase_client.get_mentor_by_user_id(request.user.id, request.user.email)
             is_mentor = mentor and str(mentor['id']) == str(booking.get('mentor_id'))
-            is_mentee = booking.get('mentee_id') == request.user.id
+            mentee_member_id = supabase_client.get_member_id_by_email(request.user.email)
+            is_mentee = str(booking.get('mentee_id', '')) == str(mentee_member_id or '')
 
             if mentor_only and not is_mentor:
                 return Response({'error': 'Only mentor can perform this action'}, status=status.HTTP_403_FORBIDDEN)
@@ -1265,7 +1296,7 @@ class MenteeDashboardViewSet(viewsets.ViewSet):
             today = timezone.now().date().isoformat()
 
             # Get bookings
-            all_bookings = supabase_client.get_mentee_bookings(user_id)
+            all_bookings = supabase_client.get_mentee_bookings(user_id, email=request.user.email)
 
             pending = [b for b in all_bookings if b.get('status') == 'pending']
             upcoming = [
@@ -1362,7 +1393,7 @@ class MenteeDashboardViewSet(viewsets.ViewSet):
         """Get all bookings for current user as mentee"""
         try:
             status_filter = request.GET.get('status')
-            bookings = supabase_client.get_mentee_bookings(request.user.id, status_filter)
+            bookings = supabase_client.get_mentee_bookings(request.user.id, status_filter, email=request.user.email)
             enriched = supabase_client.enrich_bookings(bookings, 'mentee')
 
             return Response({

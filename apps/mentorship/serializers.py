@@ -133,22 +133,23 @@ class BookingSerializer(serializers.Serializer):
     """Mentorship Booking Serializer"""
     id = serializers.UUIDField(read_only=True)
     mentor_id = serializers.UUIDField()
-    mentee_id = serializers.IntegerField()
+    mentee_id = serializers.IntegerField(required=False)
     session_date = serializers.DateField()
     start_time = serializers.TimeField()
     end_time = serializers.TimeField()
+    duration_minutes = serializers.IntegerField(required=False, min_value=30, max_value=120)
+    session_type = serializers.CharField(max_length=50, required=False, default='one-on-one')
     topic = serializers.CharField(max_length=500)
     description = serializers.CharField(max_length=2000, allow_blank=True)
+    mentee_goals = serializers.CharField(max_length=2000, required=False, allow_blank=True, allow_null=True)
     status = serializers.ChoiceField(
         choices=['pending', 'confirmed', 'completed', 'cancelled_by_mentee', 'cancelled_by_mentor'],
         default='pending'
     )
-    meeting_link = serializers.URLField(required=False, allow_null=True, allow_blank=True)
-    mentor_notes = serializers.CharField(max_length=2000, required=False, allow_blank=True, allow_null=True)
-    mentee_notes = serializers.CharField(max_length=2000, required=False, allow_blank=True, allow_null=True)
+    meeting_url = serializers.URLField(required=False, allow_null=True, allow_blank=True)
+    notes = serializers.CharField(max_length=2000, required=False, allow_blank=True, allow_null=True)
+    mentor_feedback = serializers.CharField(max_length=2000, required=False, allow_blank=True, allow_null=True)
     rating = serializers.IntegerField(min_value=1, max_value=5, required=False, allow_null=True)
-    feedback = serializers.CharField(max_length=1000, required=False, allow_blank=True, allow_null=True)
-    booking_version = serializers.IntegerField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
     

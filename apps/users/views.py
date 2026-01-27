@@ -80,18 +80,26 @@ class AdminUserViewSet(viewsets.ModelViewSet):
 @permission_classes([AllowAny])
 def email_login(request):
     """
-    Passwordless login using email only.
-    Checks if email exists in members table, auto-creates user if needed, and returns JWT token.
+    Login using email and password.
+    Checks if email exists in members table, auto-creates user with default password if needed.
+    Returns JWT token. Includes must_change_password flag so frontend can prompt password change.
     Also auto-creates mentor profile in Supabase for mentor users.
     """
     from apps.platform.models import Member
     from apps.mentorship.supabase_client import supabase_client
 
     email = request.data.get('email', '').strip().lower()
+    password = request.data.get('password', '').strip()
 
     if not email:
         return Response(
             {"error": "Email is required"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    if not password:
+        return Response(
+            {"error": "Password is required"},
             status=status.HTTP_400_BAD_REQUEST
         )
 
@@ -127,15 +135,17 @@ def email_login(request):
             else:
                 role = 'mentee'
 
-            # Auto-create user from member data
+            # Auto-create user from member data with default password
             user = User.objects.create_user(
                 email=email,
+                password=User.DEFAULT_PASSWORD,
                 first_name=first_name,
                 last_name=last_name,
                 role=role,
                 is_mentor=is_mentor,
                 is_mentee=is_mentee,
                 approval_status='approved',  # Auto-approve members
+                must_change_password=True,
             )
             logger.info(f"Auto-created user account for member: {email} (role: {role})")
 
@@ -149,6 +159,13 @@ def email_login(request):
                 },
                 status=status.HTTP_404_NOT_FOUND
             )
+
+    # Verify password
+    if not user.check_password(password):
+        return Response(
+            {"error": "Invalid password"},
+            status=status.HTTP_401_UNAUTHORIZED
+        )
 
     # Auto-create mentor profile in Supabase if user is a mentor
     mentor_profile = None
@@ -188,6 +205,7 @@ def email_login(request):
             "is_mentor": user.is_mentor,
             "is_mentee": user.is_mentee,
             "approval_status": user.approval_status,
+            "must_change_password": user.must_change_password,
         }
     }
 
@@ -196,3 +214,51 @@ def email_login(request):
         response_data["user"]["mentor_id"] = mentor_profile.get("id")
 
     return Response(response_data)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def change_password(request):
+    """
+    Change user password. Requires current_password and new_password.
+    Clears must_change_password flag after successful change.
+    """
+    current_password = request.data.get('current_password', '').strip()
+    new_password = request.data.get('new_password', '').strip()
+
+    if not current_password or not new_password:
+        return Response(
+            {"error": "Both current_password and new_password are required"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    if len(new_password) < 8:
+        return Response(
+            {"error": "New password must be at least 8 characters"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    user = request.user
+    if not user.check_password(current_password):
+        return Response(
+            {"error": "Current password is incorrect"},
+            status=status.HTTP_401_UNAUTHORIZED
+        )
+
+    if current_password == new_password:
+        return Response(
+            {"error": "New password must be different from current password"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    user.set_password(new_password)
+    user.must_change_password = False
+    user.save(update_fields=["password", "must_change_password"])
+
+    # Generate new tokens since password changed
+    refresh = RefreshToken.for_user(user)
+    return Response({
+        "detail": "Password changed successfully",
+        "access": str(refresh.access_token),
+        "refresh": str(refresh),
+    })

@@ -238,7 +238,11 @@ CELERY_ENABLE_UTC = True
 CELERY_BEAT_SCHEDULE = {
     'send-session-reminders-24h': {
         'task': 'apps.mentorship.tasks.send_session_reminder_24h',
-        'schedule': 86400.0,  # Run daily (24 hours in seconds)
+        'schedule': 3600.0,  # Run every hour to catch sessions in the 23-25h window
+    },
+    'send-session-reminders-1h': {
+        'task': 'apps.mentorship.tasks.send_session_reminder_1h',
+        'schedule': 900.0,  # Run every 15 minutes to catch sessions in the 55-95min window
     },
 }
 

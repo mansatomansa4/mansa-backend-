@@ -24,8 +24,11 @@ class UserSerializer(serializers.ModelSerializer):
             "bio",
             "date_joined",
             "date_approved",
+            "is_mentor",
+            "is_mentee",
+            "must_change_password",
         ]
-        read_only_fields = ["id", "date_joined", "role", "approval_status", "date_approved"]
+        read_only_fields = ["id", "date_joined", "role", "approval_status", "date_approved", "is_mentor", "is_mentee", "must_change_password"]
 
 
 class RegisterSerializer(serializers.ModelSerializer):

@@ -97,6 +97,23 @@ class SupabaseMentorshipClient:
         except Exception as e:
             logger.error(f"Failed to initialize Supabase client: {e}")
     
+    def get_member_id_by_email(self, email: str) -> Optional[str]:
+        """Get member UUID from the members table by email."""
+        try:
+            response = self._circuit_breaker.call(
+                lambda: self._client.table('members')
+                .select('id')
+                .ilike('email', email)
+                .limit(1)
+                .execute()
+            )
+            if response.data and len(response.data) > 0:
+                return response.data[0]['id']
+            return None
+        except Exception as e:
+            logger.error(f"Error fetching member by email {email}: {e}")
+            return None
+
     def is_healthy(self) -> bool:
         """Health check - test Supabase connectivity"""
         try:
@@ -643,35 +660,42 @@ class SupabaseMentorshipClient:
             logger.error(f"Error creating booking: {e}")
             raise
     
-    def update_booking_status(self, booking_id: str, status: str, expected_version: int) -> Optional[Dict]:
-        """Update booking status with optimistic locking"""
+    def update_booking_status(self, booking_id: str, status: str, expected_version: int = None) -> Optional[Dict]:
+        """Update booking status"""
         try:
             data = {
                 'status': status,
-                'booking_version': expected_version + 1,
                 'updated_at': datetime.utcnow().isoformat()
             }
-            
+
             response = self._circuit_breaker.call(
                 lambda: self._client.table('mentorship_bookings')
                 .update(data)
                 .eq('id', booking_id)
-                .eq('booking_version', expected_version)
                 .execute()
             )
-            
+
             if not response.data:
-                raise Exception("Version mismatch - booking was updated by another process")
-            
+                raise Exception("Booking not found or update failed")
+
             return response.data[0]
         except Exception as e:
             logger.error(f"Error updating booking {booking_id}: {e}")
             raise
     
-    def get_mentee_bookings(self, user_id: int, status_filter: str = None, limit: int = None) -> List[Dict]:
-        """Get all bookings for a mentee"""
+    def get_mentee_bookings(self, user_id_or_member_id, status_filter: str = None, limit: int = None, email: str = None) -> List[Dict]:
+        """Get all bookings for a mentee. Accepts member UUID or Django user ID + email."""
         try:
-            query = self._client.table('mentorship_bookings').select('*').eq('mentee_id', user_id)
+            mentee_id = user_id_or_member_id
+            # If it looks like an integer (Django user_id), resolve to member UUID via email
+            if isinstance(user_id_or_member_id, int) and email:
+                member_id = self.get_member_id_by_email(email)
+                if member_id:
+                    mentee_id = member_id
+                else:
+                    logger.warning(f"No member found for email {email}, using user_id {user_id_or_member_id}")
+                    return []
+            query = self._client.table('mentorship_bookings').select('*').eq('mentee_id', str(mentee_id))
 
             if status_filter:
                 query = query.eq('status', status_filter)
@@ -796,14 +820,34 @@ class SupabaseMentorshipClient:
 
     def get_mentor_reviews(self, mentor_id: str, limit: int = 10, page: int = 1, page_size: int = 10) -> List[Dict]:
         """Get reviews for a mentor with pagination"""
-        # NOTE: mentorship_reviews table doesn't exist in the database
-        # Returning empty list until table is created
-        return []
-        
+        try:
+            offset = (page - 1) * page_size
+            response = self._circuit_breaker.call(
+                lambda: self._client.table('mentorship_reviews')
+                .select('*')
+                .eq('mentor_id', mentor_id)
+                .order('created_at', desc=True)
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            return response.data or []
+        except Exception as e:
+            logger.error(f"Error fetching reviews for mentor {mentor_id}: {e}")
+            return []
+
     def get_mentor_review_count(self, mentor_id: str) -> int:
         """Get total review count for a mentor"""
-        # NOTE: mentorship_reviews table doesn't exist in the database
-        return 0
+        try:
+            response = self._circuit_breaker.call(
+                lambda: self._client.table('mentorship_reviews')
+                .select('id', count='exact')
+                .eq('mentor_id', mentor_id)
+                .execute()
+            )
+            return response.count or 0
+        except Exception as e:
+            logger.error(f"Error fetching review count for mentor {mentor_id}: {e}")
+            return 0
 
     def create_review(self, data: Dict) -> Optional[Dict]:
         """Create a new review for a mentor"""
@@ -814,6 +858,7 @@ class SupabaseMentorshipClient:
                 'booking_id': data.get('booking_id'),
                 'rating': data['rating'],
                 'comment': data.get('comment', ''),
+                'mentee_name': data.get('mentee_name', ''),
                 'created_at': datetime.utcnow().isoformat()
             }
 
@@ -1024,16 +1069,41 @@ class SupabaseMentorshipClient:
     def create_booking(self, data: Dict) -> Optional[Dict]:
         """Create a new booking"""
         try:
+            # Build session_date as full ISO timestamp from date + start_time
+            session_date = data.get('session_date', '')
+            start_time = data.get('start_time', '')
+            if isinstance(session_date, str) and 'T' not in session_date and start_time:
+                # Combine date and time into ISO timestamp
+                session_date = f"{session_date}T{start_time}:00+00:00"
+            elif hasattr(session_date, 'isoformat'):
+                st = data.get('start_time', '')
+                if hasattr(st, 'isoformat'):
+                    st = st.isoformat()
+                session_date = f"{session_date.isoformat()}T{st}+00:00"
+
+            # Calculate duration from start_time and end_time
+            duration_minutes = data.get('duration_minutes', 60)
+            if 'start_time' in data and 'end_time' in data:
+                from datetime import datetime as dt
+                st = data['start_time']
+                et = data['end_time']
+                if hasattr(st, 'hour'):
+                    duration_minutes = (et.hour * 60 + et.minute) - (st.hour * 60 + st.minute)
+                elif isinstance(st, str) and isinstance(et, str):
+                    sp = st.split(':')
+                    ep = et.split(':')
+                    duration_minutes = (int(ep[0]) * 60 + int(ep[1])) - (int(sp[0]) * 60 + int(sp[1]))
+
             booking_data = {
-                'mentor_id': data['mentor_id'],
-                'mentee_id': data['mentee_id'],
-                'session_date': data['session_date'],
-                'start_time': data['start_time'],
-                'end_time': data['end_time'],
+                'mentor_id': str(data['mentor_id']),
+                'mentee_id': str(data['mentee_id']),
+                'session_date': session_date,
+                'duration_minutes': duration_minutes,
+                'session_type': data.get('session_type', 'one-on-one'),
                 'topic': data.get('topic', ''),
-                'message': data.get('message', ''),
+                'notes': data.get('description', '') or data.get('notes', ''),
+                'mentee_goals': data.get('mentee_goals', ''),
                 'status': 'pending',
-                'booking_version': 1,
                 'created_at': datetime.utcnow().isoformat()
             }
 
@@ -1053,9 +1123,11 @@ class SupabaseMentorshipClient:
             # Build update data
             update_data = {}
             allowed_fields = [
-                'status', 'session_date', 'start_time', 'end_time',
-                'topic', 'message', 'meeting_link', 'mentor_notes',
-                'mentee_notes', 'cancellation_reason', 'completed_at'
+                'status', 'session_date', 'duration_minutes',
+                'topic', 'notes', 'meeting_url', 'meeting_platform',
+                'mentor_feedback', 'mentee_goals',
+                'cancellation_reason', 'cancelled_by', 'cancelled_at',
+                'rating', 'booking_status',
             ]
 
             for field in allowed_fields:
@@ -1078,11 +1150,20 @@ class SupabaseMentorshipClient:
     def reschedule_booking(self, booking_id: str, new_date: str, new_start: str, new_end: str) -> Optional[Dict]:
         """Reschedule a booking to a new date/time"""
         try:
+            # Combine date + time into ISO timestamp
+            session_date = f"{new_date}T{new_start}:00+00:00"
+
+            # Calculate duration
+            duration_minutes = 60
+            if new_start and new_end:
+                sp = new_start.split(':')
+                ep = new_end.split(':')
+                duration_minutes = (int(ep[0]) * 60 + int(ep[1])) - (int(sp[0]) * 60 + int(sp[1]))
+
             update_data = {
-                'session_date': new_date,
-                'start_time': new_start,
-                'end_time': new_end,
-                'status': 'rescheduled',
+                'session_date': session_date,
+                'duration_minutes': duration_minutes,
+                'status': 'pending',
                 'updated_at': datetime.utcnow().isoformat()
             }
 
@@ -1101,21 +1182,39 @@ class SupabaseMentorshipClient:
         self,
         mentor_id: str,
         session_date: str,
-        start_time: str,
-        end_time: str,
+        start_time: str = None,
+        end_time: str = None,
         exclude_booking_id: str = None
     ) -> bool:
         """
         Check if there are any conflicting bookings for the given time slot.
         Returns True if there's a conflict.
+        The DB stores session_date as a timestamp and duration_minutes.
         """
         try:
-            # Get bookings for the mentor on the same date
+            # Build the full timestamp for the requested session
+            if start_time and 'T' not in str(session_date):
+                requested_start = f"{session_date}T{start_time}:00+00:00"
+            else:
+                requested_start = str(session_date)
+
+            # Calculate requested end time
+            if start_time and end_time:
+                requested_end = f"{session_date}T{end_time}:00+00:00"
+            else:
+                requested_end = None
+
+            # Get all bookings for this mentor on the same date
+            # Filter by date range: from start of day to end of day
+            day_start = f"{str(session_date)[:10]}T00:00:00+00:00"
+            day_end = f"{str(session_date)[:10]}T23:59:59+00:00"
+
             query = (
                 self._client.table('mentorship_bookings')
-                .select('id, start_time, end_time')
+                .select('id, session_date, duration_minutes')
                 .eq('mentor_id', mentor_id)
-                .eq('session_date', session_date)
+                .gte('session_date', day_start)
+                .lte('session_date', day_end)
                 .in_('status', ['pending', 'confirmed'])
             )
 
@@ -1127,14 +1226,21 @@ class SupabaseMentorshipClient:
             if not response.data:
                 return False
 
-            # Check for time overlap
-            for booking in response.data:
-                existing_start = booking['start_time']
-                existing_end = booking['end_time']
+            # Check for time overlap using session_date + duration_minutes
+            from datetime import datetime as dt, timedelta
+            req_start = dt.fromisoformat(requested_start.replace('+00:00', '+00:00'))
+            if requested_end:
+                req_end = dt.fromisoformat(requested_end.replace('+00:00', '+00:00'))
+            else:
+                req_end = req_start + timedelta(minutes=60)
 
-                # Check if times overlap
-                # New slot starts before existing ends AND new slot ends after existing starts
-                if start_time < existing_end and end_time > existing_start:
+            for booking in response.data:
+                existing_start = dt.fromisoformat(booking['session_date'].replace('Z', '+00:00'))
+                existing_duration = booking.get('duration_minutes', 60)
+                existing_end = existing_start + timedelta(minutes=existing_duration)
+
+                # Check overlap
+                if req_start < existing_end and req_end > existing_start:
                     logger.warning(f"Booking conflict detected for mentor {mentor_id} on {session_date}")
                     return True
 

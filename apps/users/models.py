@@ -64,9 +64,15 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_mentor = models.BooleanField(default=False, help_text="User is registered as a mentor")
     is_mentee = models.BooleanField(default=False, help_text="User is registered as a mentee")
     mentor_approved_at = models.DateTimeField(blank=True, null=True, help_text="When mentor application was approved")
+    must_change_password = models.BooleanField(
+        default=False,
+        help_text="True when user was created with default password and must change it"
+    )
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     date_joined = models.DateTimeField(default=timezone.now)
+
+    DEFAULT_PASSWORD = "Mansa2026!"
 
     objects = UserManager()
 

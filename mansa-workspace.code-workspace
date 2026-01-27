@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../Mansa-dashboard"
+		},
+		{
+			"path": "../mansa-redesign"
+		}
+	],
+	"settings": {}
+}
