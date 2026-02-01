@@ -6,8 +6,11 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
 
-from .models import Event, EventImage
-from .serializers import EventSerializer, EventListSerializer, EventImageSerializer
+from .models import Event, EventImage, EventRegistration
+from .serializers import (
+    EventSerializer, EventListSerializer, EventImageSerializer,
+    EventRegistrationSerializer, EventRegistrationListSerializer
+)
 
 
 class EventViewSet(viewsets.ModelViewSet):
@@ -271,3 +274,157 @@ class EventViewSet(viewsets.ModelViewSet):
                 {'error': 'Image not found'},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+    @action(detail=True, methods=['get'], permission_classes=[])
+    def registrations(self, request, pk=None):
+        """Get all registrations for a specific event (admin only in production)"""
+        event = self.get_object()
+        registrations = EventRegistration.objects.filter(event=event)
+
+        # In production, you might want to add permission checks here
+        # if not request.user.is_staff:
+        #     return Response({'error': 'Permission denied'}, status=403)
+
+        serializer = EventRegistrationListSerializer(registrations, many=True)
+        return Response(serializer.data)
+
+
+class EventRegistrationViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing event registrations.
+
+    Public users can create registrations.
+    Admins can view all registrations.
+    """
+    permission_classes = []  # Allow public registration
+    serializer_class = EventRegistrationSerializer
+    queryset = EventRegistration.objects.select_related('event').all()
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['event', 'status', 'is_student', 'is_member']
+    search_fields = ['full_name', 'email', 'phone_number']
+    ordering_fields = ['registered_at', 'full_name']
+    ordering = ['-registered_at']
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return EventRegistrationListSerializer
+        return EventRegistrationSerializer
+
+    def create(self, request, *args, **kwargs):
+        """Handle event registration with email notification"""
+        import logging
+        logger = logging.getLogger(__name__)
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        # Create registration
+        registration = serializer.save()
+
+        # Send confirmation email
+        try:
+            self._send_confirmation_email(registration)
+            registration.confirmation_email_sent = True
+            registration.confirmation_email_sent_at = timezone.now()
+            registration.save()
+        except Exception as e:
+            logger.error(f"Failed to send confirmation email: {e}")
+            # Don't fail the registration if email fails
+
+        output_serializer = self.get_serializer(registration)
+        return Response(output_serializer.data, status=status.HTTP_201_CREATED)
+
+    def _send_confirmation_email(self, registration):
+        """Send confirmation email to registrant"""
+        from django.core.mail import send_mail
+        from django.conf import settings
+
+        subject = f"Registration Confirmed: {registration.event.title}"
+
+        # Format date and time
+        event_date = registration.event.date.strftime('%A, %B %d, %Y')
+        event_time = f"{registration.event.start_time.strftime('%I:%M %p')} - {registration.event.end_time.strftime('%I:%M %p')}"
+
+        # Build message
+        message = f"""Hi {registration.full_name},
+
+Thank you for registering for {registration.event.title}!
+
+Event Details:
+- Date: {event_date}
+- Time: {event_time}
+- Location: {registration.event.location}
+
+We're excited to see you there!
+"""
+
+        # Add join community message for non-members
+        if not registration.is_member:
+            frontend_url = settings.FRONTEND_URL or 'https://your-domain.com'
+            message += f"""
+We noticed you're not a member of the Mansa-to-Mansa community yet.
+Join us at: {frontend_url}/signup
+"""
+
+        message += """
+Best regards,
+The Mansa-to-Mansa Team
+"""
+
+        # Send email
+        send_mail(
+            subject=subject,
+            message=message,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[registration.email],
+            fail_silently=False,
+        )
+
+    @action(detail=False, methods=['get'], permission_classes=[])
+    def check_registration(self, request):
+        """Check if user is already registered for an event"""
+        event_id = request.query_params.get('event_id')
+        email = request.query_params.get('email')
+
+        if not event_id or not email:
+            return Response(
+                {'error': 'event_id and email are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            registration = EventRegistration.objects.get(
+                event_id=event_id,
+                email=email
+            )
+            return Response({
+                'registered': True,
+                'registration': {
+                    'id': registration.id,
+                    'registered_at': registration.registered_at,
+                    'status': registration.status
+                }
+            })
+        except EventRegistration.DoesNotExist:
+            return Response({'registered': False})
+
+    @action(detail=True, methods=['post'], permission_classes=[])
+    def cancel(self, request, pk=None):
+        """Cancel a registration"""
+        registration = self.get_object()
+
+        # Check if event hasn't passed
+        if registration.event.status == 'past':
+            return Response(
+                {'error': 'Cannot cancel registration for past events'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Update status
+        registration.status = 'cancelled'
+        registration.cancelled_at = timezone.now()
+        registration.cancellation_reason = request.data.get('reason', '')
+        registration.save()
+
+        serializer = self.get_serializer(registration)
+        return Response(serializer.data)

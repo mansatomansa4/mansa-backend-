@@ -83,11 +83,96 @@ class EventImage(models.Model):
     caption = models.CharField(max_length=255, blank=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
     display_order = models.IntegerField(default=0, db_column='display_order')
-    
+
     class Meta:
         db_table = 'event_images'
         managed = False  # Use existing Supabase table
         ordering = ['display_order', 'uploaded_at']
-    
+
     def __str__(self):
         return f"Image for {self.event.title}"
+
+
+class EventRegistration(models.Model):
+    """
+    Model for event registrations from users.
+    Stores information about who registered for which event.
+    Uses Supabase event_registrations table.
+    """
+    STATUS_CHOICES = [
+        ('confirmed', 'Confirmed'),
+        ('cancelled', 'Cancelled'),
+        ('attended', 'Attended'),
+        ('no_show', 'No Show'),
+    ]
+
+    # Primary key
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    # Foreign key to events table
+    event = models.ForeignKey(
+        Event,
+        on_delete=models.CASCADE,
+        related_name='registrations',
+        db_column='event_id'
+    )
+
+    # Registrant information
+    full_name = models.TextField()
+    email = models.TextField()
+    phone_number = models.TextField()
+
+    # Student information
+    is_student = models.BooleanField(default=False)
+    institution_name = models.TextField(blank=True, null=True)
+
+    # Community membership
+    is_member = models.BooleanField(default=False)
+
+    # Optional: Link to members table if they are a member
+    member_id = models.UUIDField(null=True, blank=True, db_column='member_id')
+
+    # Registration status
+    status = models.TextField(default='confirmed')
+
+    # Cancellation tracking
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancelled_by = models.UUIDField(null=True, blank=True)
+    cancellation_reason = models.TextField(blank=True, null=True)
+
+    # Email tracking
+    confirmation_email_sent = models.BooleanField(default=False)
+    confirmation_email_sent_at = models.DateTimeField(null=True, blank=True)
+    reminder_email_sent = models.BooleanField(default=False)
+    reminder_email_sent_at = models.DateTimeField(null=True, blank=True)
+
+    # Timestamps
+    registered_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    # Metadata for additional information (stored as JSONB in Supabase)
+    # Note: Django doesn't have native JSONB field for non-Postgres DBs,
+    # but since we're using Supabase (Postgres), we can use JSONField
+    from django.db.models import JSONField
+    metadata = JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = 'event_registrations'
+        managed = False  # Use existing Supabase table
+        ordering = ['-registered_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['event', 'email'],
+                name='event_registrations_unique_email_per_event'
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.full_name} - {self.event.title}"
+
+    def save(self, *args, **kwargs):
+        # Validate institution_name requirement for students
+        if self.is_student and not self.institution_name:
+            raise ValueError("Institution name is required for students")
+        super().save(*args, **kwargs)
