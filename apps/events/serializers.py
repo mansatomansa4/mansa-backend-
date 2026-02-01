@@ -132,11 +132,16 @@ class EventRegistrationSerializer(serializers.ModelSerializer):
 
 class EventRegistrationListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for listing registrations"""
+    event_id = serializers.UUIDField(source='event.id', read_only=True)
     event_title = serializers.CharField(source='event.title', read_only=True)
+    event_date = serializers.DateField(source='event.date', read_only=True)
 
     class Meta:
         model = EventRegistration
         fields = [
-            'id', 'event_title', 'full_name', 'email',
-            'is_student', 'is_member', 'status', 'registered_at'
+            'id', 'event_id', 'event_title', 'event_date',
+            'full_name', 'email', 'phone_number',
+            'is_student', 'institution_name',
+            'is_member', 'status',
+            'registered_at', 'created_at'
         ]
