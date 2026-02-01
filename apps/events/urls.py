@@ -7,7 +7,7 @@ router.register(r'events', EventViewSet, basename='event')
 router.register(r'registrations', EventRegistrationViewSet, basename='event-registration')
 
 urlpatterns = [
-    path('', include(router.urls)),
-    # Custom registration endpoint for simpler frontend integration
+    # Custom registration endpoint MUST come before router.urls to avoid conflict
     path('events/register/', EventRegistrationViewSet.as_view({'post': 'create'}), name='event-register'),
+    path('', include(router.urls)),
 ]
