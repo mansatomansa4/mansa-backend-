@@ -311,7 +311,7 @@ class EventRegistrationViewSet(viewsets.ModelViewSet):
         return EventRegistrationSerializer
 
     def create(self, request, *args, **kwargs):
-        """Handle event registration with email notification"""
+        """Handle event registration without email notification"""
         import logging
         logger = logging.getLogger(__name__)
 
@@ -321,15 +321,15 @@ class EventRegistrationViewSet(viewsets.ModelViewSet):
         # Create registration
         registration = serializer.save()
 
-        # Send confirmation email
-        try:
-            self._send_confirmation_email(registration)
-            registration.confirmation_email_sent = True
-            registration.confirmation_email_sent_at = timezone.now()
-            registration.save()
-        except Exception as e:
-            logger.error(f"Failed to send confirmation email: {e}")
-            # Don't fail the registration if email fails
+        # # Send confirmation email
+        # try:
+        #     self._send_confirmation_email(registration)
+        #     registration.confirmation_email_sent = True
+        #     registration.confirmation_email_sent_at = timezone.now()
+        #     registration.save()
+        # except Exception as e:
+        #     logger.error(f"Failed to send confirmation email: {e}")
+        #     # Don't fail the registration if email fails
 
         output_serializer = self.get_serializer(registration)
         return Response(output_serializer.data, status=status.HTTP_201_CREATED)
